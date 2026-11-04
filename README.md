@@ -6,6 +6,8 @@ Answers: *how much does the size and spread of Cloudflare's network matter for m
 
 ## Reports (tabs)
 
+Tabs are grouped into **Network**, **Security** and **Admin**. The Admin group, and user-level detail elsewhere, is only shown to members of an `ADMIN_GROUPS` group (see Security model).
+
 | Tab | What it shows | Data |
 | --- | --- | --- |
 | **Traffic** | Every Cloudflare POP (orange) with traffic circles per POP or shaded countries. Toggle any combination of DNS, HTTP, Network, Bandwidth, Access logins, Users, Devices (each its own colour; concentric circles per POP). Trend vs the previous period per location plus "biggest movers". **Timeline** plays hourly (24h/7d) or daily (30d/90d) frames. | Logpush aggregates, GraphQL fallback |
@@ -14,6 +16,13 @@ Answers: *how much does the size and spread of Cloudflare's network matter for m
 | **Entry & exit** | Where traffic enters Cloudflare and where it exits when different (e.g. dedicated egress), on-ramps (WARP, Magic Tunnel, …) and off-ramps, **CNI facilities** with v1/v2 dataplanes, and a **Regional Services check** (entry POPs outside a selected managed region). | `entry_exit` report, `shared/cni.ts`, `shared/regions.ts` |
 | **Performance** | Client → Cloudflare TCP handshake by entry POP or user country (green < 20 ms … red ≥ 100 ms), plus **DEX** HTTP test duration/failure rate and WARP handshake latency. | `perf_pop` / `perf_country` reports; DEX from Logpush |
 | **Security** | Blocked DNS / HTTP / network traffic, DLP matches and AV-blocked files by country or POP, with block rate per location, top blocked DNS categories and top DNS categories (per country when selected). | `sec_*` reports; category names from the Gateway categories API |
+| **Threats & data** | Blocked security-risk categories (malware, phishing, C2, …), Shadow IT (SaaS apps in use with their review status, requests and uploaded bytes), DLP matches by destination, malware blocked by antivirus/sandbox. Admins also see the most targeted users and per-user attribution. | Gateway DNS/HTTP analytics; Gateway categories and app types APIs |
+| **Identity** | Access logins per day, by country, identity provider and application (success vs failure). Admins also get a user table (logins, failures, devices, last login), seat counts with inactive seats to reclaim, and applications with no logins. | Access login analytics; Access users and applications APIs |
+| **Posture** (admin) | Configuration score and ranked findings: Bypass / Everyone policies, missing Access-enforced MFA, long sessions, expiring/unused service tokens, disabled or never-matched Gateway rules, allow-all rules above blocks, TLS inspection/AV/logging off, weak WARP device settings, split tunnels excluding all traffic. Gateway rule match counts (30 days). | Access, Gateway and device settings APIs; Gateway analytics |
+| **Devices** (admin) | Enrolled devices, OS mix, WARP client versions (outdated = more than two releases behind the newest in the fleet), devices not seen in 30+ days, posture checks configured. | Devices and device posture APIs |
+| **Tunnels** (admin) | Cloudflare Tunnel status and connector versions, Magic WAN tunnel health (24h), with connectors drawn on the map at their POPs. | Cloudflare Tunnel API; Magic WAN health-check analytics |
+| **Changes** (admin) | Audit log with full-text search, facet filters (actor, action, resource, interface, result), sortable columns, a per-day chart that filters the table, a Zero Trust-only toggle, and before/after diffs. | Audit logs API |
+| **User lookup** (admin) | One user's profile, devices, sign-ins, countries, POPs, blocked categories, top destinations and DLP/AV counts. User names anywhere in the dashboard link here. | Access users/devices APIs; Access and Gateway analytics |
 
 Data center coverage: POPs come from `speed.cloudflare.com/locations`, plus data centers missing from it (e.g. MEX) placed at their airport (`worker/data/extraColos.ts`). POP tiers (T1–T3) aren't included: there's no public source.
 
@@ -109,6 +118,7 @@ Logpush pricing: the first 25 GB per month to R2 is included, then $0.03/GB ([pr
 ## Security model
 
 - **Authentication:** every `/api/*` request must carry a valid Cloudflare Access JWT (`Cf-Access-Jwt-Assertion` header or `CF_Authorization` cookie) for the application set in `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`. The signature, issuer, audience and expiry are verified against the team's published keys. If either var is missing, the API fails closed (`misconfigured`). `ALLOW_UNAUTHENTICATED=true` (only in `.dev.vars`) skips the check for `localhost` requests and has no effect on any other hostname.
+- **Roles:** the viewer's role comes from their Access identity (`/cdn-cgi/access/get-identity`, cached 5 minutes per token). Members of a group listed in `ADMIN_GROUPS` (name, email or id) are admins; everyone else is a viewer, including when the identity can't be read. Admin endpoints (`/api/posture`, `/api/devices`, `/api/tunnels`, `/api/changes`, `/api/users`, `/api/user`) return 403 to viewers, and admin responses are cached under a separate key so they're never served to viewers. Shared endpoints (`/api/identity`, `/api/threats`) omit user-level fields for viewers.
 - **Errors:** responses carry fixed codes (`bad_request`, `unauthorized`, `misconfigured`, `rate_limited`, `upstream_error`). Upstream and D1 error text goes to Worker logs only.
 - **Upstream data:** responses from speed.cloudflare.com, sasecloudmap.com and the Cloudflare API are read with byte limits, validated, and only the validated result is cached. Vendor lists are fetched with at most 3 requests in flight.
 - **UI:** map popups are built with DOM APIs (no HTML strings). `public/_headers` sets a CSP (`default-src 'self'`, `frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
@@ -133,6 +143,9 @@ worker/index.ts      fetch (API), queue (Logpush ingestion + DLQ) and scheduled 
 worker/access.ts     Cloudflare Access JWT verification
 worker/http.ts       strict parameter parsing, error codes, response headers, post-auth result cache
 worker/upstream.ts   byte-limited JSON reads, validated-value cache, bounded concurrency
+worker/rbac.ts       roles from the Access identity (ADMIN_GROUPS)
+worker/cfapi.ts      Cloudflare REST client; per-section missing-permission reporting
+worker/admin/        posture, identity, devices, tunnels, threats, changes (audit log), users
 worker/logpush.ts    Logpush field mapping, streaming aggregation, D1 writes/reads, coverage
 worker/traffic.ts    traffic map: hybrid read path, previous-period offsets, timeline frames
 worker/reports.ts    whitelisted GraphQL reports (/api/report)
@@ -171,8 +184,15 @@ The Wrangler OAuth token has no Zero Trust scope, so category names show as IDs 
    npx wrangler r2 bucket notification create cf1-dashboard-logs --event-type object-create --queue cf1-dashboard-logpush --prefix logpush/ --suffix .log.gz
    npx wrangler r2 bucket lifecycle add cf1-dashboard-logs expire-raw-logpush logpush/ --expire-days 30 --force
    ```
-2. Create the Cloudflare Access application for the dashboard hostname first. Then set `CLOUDFLARE_ACCOUNT_ID`, `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`) and `ACCESS_AUD` (the application's Audience tag) in `wrangler.jsonc`. Store an **account API token** with **Account Analytics: Read** and **Zero Trust: Read** (category names):
-   `npx wrangler secret put CLOUDFLARE_API_TOKEN`
+2. Create the Cloudflare Access application for the dashboard hostname first. Then set `CLOUDFLARE_ACCOUNT_ID`, `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`) and `ACCESS_AUD` (the application's Audience tag) in `wrangler.jsonc`. Store an **account API token** (`npx wrangler secret put CLOUDFLARE_API_TOKEN`) with:
+   - **Account Analytics: Read**: all analytics.
+   - **Zero Trust: Read**: categories, Gateway rules/settings, apps, devices, device settings and posture.
+   - **Zero Trust: PII Read**: user emails in analytics (otherwise shown as `REDACTED`, and per-user views are unavailable).
+   - **Access: Apps and Policies Read**, **Access: Service Tokens Read**, **Access: Organizations, Identity Providers, and Groups Read**: posture checks and app names.
+   - **Cloudflare Tunnel Read**: tunnel health.
+   - **Account Settings Read**: audit log (Changes tab).
+
+   Each section reports the permission it's missing instead of failing the page. Set `ADMIN_GROUPS` to the group(s) that should get the admin view.
 3. `npm run deploy`
 4. Create the Logpush jobs (above).
 5. Serve it only through the Access-protected custom domain (`routes` in `wrangler.jsonc`). `workers_dev` and `preview_urls` stay off. The Worker also verifies the Access JWT itself, so a missing or misconfigured Access application fails closed instead of exposing data.

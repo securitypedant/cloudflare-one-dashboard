@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import type { Severity } from "../../shared/admin.ts";
+import { SEVERITY_COLORS } from "../lib/colors.ts";
 
 export function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
 	return (
@@ -38,4 +40,21 @@ export function Status({ loading, error }: { loading?: boolean; error?: string }
 	if (error) return <div className="error-text">{error}</div>;
 	if (loading) return <div className="muted">Loading…</div>;
 	return null;
+}
+
+export function SeverityBadge({ severity }: { severity: Severity }) {
+	return (
+		<span className="severity" style={{ borderColor: SEVERITY_COLORS[severity], color: SEVERITY_COLORS[severity] }}>
+			{severity}
+		</span>
+	);
+}
+
+/** Coloured status pill (healthy/degraded/down, approved/unapproved, …). */
+export function StatusPill({ text, color }: { text: string; color: string }) {
+	return (
+		<span className="severity" style={{ borderColor: color, color }}>
+			{text}
+		</span>
+	);
 }

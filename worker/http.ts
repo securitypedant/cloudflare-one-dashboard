@@ -12,11 +12,12 @@ export const json = (body: unknown, init: ResponseInit = {}) =>
 	Response.json(body, { ...init, headers: { ...SECURITY_HEADERS, ...init.headers } });
 
 /** Stable, non-revealing error codes. Details go to Worker logs only. */
-export type ErrorCode = "bad_request" | "unauthorized" | "not_found" | "method_not_allowed" | "misconfigured" | "rate_limited" | "upstream_error";
+export type ErrorCode = "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "misconfigured" | "rate_limited" | "upstream_error";
 
 const MESSAGES: Record<ErrorCode, string> = {
 	bad_request: "Invalid request parameters.",
 	unauthorized: "Authentication required.",
+	forbidden: "This view is limited to dashboard admins.",
 	not_found: "Not found.",
 	method_not_allowed: "Method not allowed.",
 	misconfigured: "The dashboard is not configured correctly. Check the Worker logs.",
@@ -27,6 +28,7 @@ const MESSAGES: Record<ErrorCode, string> = {
 const STATUS: Record<ErrorCode, number> = {
 	bad_request: 400,
 	unauthorized: 401,
+	forbidden: 403,
 	not_found: 404,
 	method_not_allowed: 405,
 	misconfigured: 500,
@@ -44,14 +46,22 @@ export class RateLimitedError extends Error {}
 
 export class BadRequestError extends Error {}
 
-type ParamSpec = Record<string, { values: readonly string[]; optional?: boolean }>;
+/** A parameter is either one of a fixed list of values, or a string matching an anchored pattern. */
+type ParamRule = { values: readonly string[]; optional?: boolean } | { pattern: RegExp; maxLength: number; optional?: boolean; values?: undefined };
+type ParamSpec = Record<string, ParamRule>;
+type ParamValue<R extends ParamRule> = R extends { values: readonly (infer V)[] } ? V : string;
+
+/** Email-like identifiers (per-user page). Lower-cased by the caller before matching. */
+export const EMAIL_PARAM = { pattern: /^[a-z0-9._%+'-]+@[a-z0-9.-]+\.[a-z]{2,}$/, maxLength: 254 } as const;
+/** UUID path/query identifiers. */
+export const UUID_PARAM = { pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, maxLength: 36 } as const;
 
 /**
  * Strict query parsing: every parameter must be known, appear at most once, and match its allowed
- * values. Rejecting unknown parameters keeps the cache key canonical (no cache-busting variants).
- * Returns the canonical query string (fixed key order) for use as a cache key.
+ * values or pattern. Rejecting unknown parameters keeps the cache key canonical (no cache-busting
+ * variants). Returns the canonical query string (fixed key order) for use as a cache key.
  */
-export function parseParams<S extends ParamSpec>(url: URL, spec: S): { params: { [K in keyof S]: S[K]["values"][number] }; canonical: string } {
+export function parseParams<S extends ParamSpec>(url: URL, spec: S): { params: { [K in keyof S]: ParamValue<S[K]> }; canonical: string } {
 	const seen = new Set<string>();
 	for (const name of url.searchParams.keys()) {
 		if (!(Object.hasOwn(spec, name))) throw new BadRequestError(`unknown parameter "${name}"`);
@@ -60,17 +70,21 @@ export function parseParams<S extends ParamSpec>(url: URL, spec: S): { params: {
 	}
 	const params: Record<string, string> = {};
 	const parts: string[] = [];
-	for (const [name, { values, optional }] of Object.entries(spec)) {
+	for (const [name, rule] of Object.entries(spec)) {
 		const value = url.searchParams.get(name);
 		if (value === null) {
-			if (optional) continue;
+			if (rule.optional) continue;
 			throw new BadRequestError(`missing parameter "${name}"`);
 		}
-		if (!values.includes(value)) throw new BadRequestError(`"${name}" must be one of ${values.join(", ")}`);
+		if (rule.values) {
+			if (!rule.values.includes(value)) throw new BadRequestError(`"${name}" must be one of ${rule.values.join(", ")}`);
+		} else if (value.length > rule.maxLength || !rule.pattern.test(value)) {
+			throw new BadRequestError(`"${name}" is not valid`);
+		}
 		params[name] = value;
-		parts.push(`${name}=${value}`);
+		parts.push(`${name}=${encodeURIComponent(value)}`);
 	}
-	return { params: params as { [K in keyof S]: S[K]["values"][number] }, canonical: parts.join("&") };
+	return { params: params as { [K in keyof S]: ParamValue<S[K]> }, canonical: parts.join("&") };
 }
 
 /**

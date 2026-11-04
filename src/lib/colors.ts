@@ -22,3 +22,17 @@ export const DATASET_SHORT: Record<DatasetId, string> = {
 	users: "Users",
 	devices: "Devs",
 };
+
+export const SEVERITY_COLORS = { high: "#f87171", medium: "#fb923c", low: "#facc15", info: "#94a3b8" } as const;
+
+export const STATUS_COLORS: Record<string, string> = {
+	healthy: "#4ade80",
+	approved: "#4ade80",
+	degraded: "#facc15",
+	inReview: "#facc15",
+	unreviewed: "#94a3b8",
+	inactive: "#94a3b8",
+	unknown: "#94a3b8",
+	down: "#f87171",
+	unapproved: "#f87171",
+};

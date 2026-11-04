@@ -26,13 +26,16 @@
 	 * request and fails closed without them (Zero Trust > Access > Applications > your app > AUD).
 	 * LOGPUSH_BUCKET: queue notifications from any other bucket are ignored.
 	 * RETENTION_DAYS: hourly aggregates older than this are purged daily (cron below).
+	 * ADMIN_GROUPS: comma-separated group names/ids from the Access identity that get the admin view
+	 * (posture, devices, tunnels, change history, per-user pages). Empty = nobody is an admin.
 	 */
 	"vars": {
 		"CLOUDFLARE_ACCOUNT_ID": "<YOUR_ACCOUNT_ID>",
 		"ACCESS_TEAM_DOMAIN": "<YOUR_TEAM>.cloudflareaccess.com",
 		"ACCESS_AUD": "<YOUR_ACCESS_APPLICATION_AUD>",
 		"LOGPUSH_BUCKET": "cf1-dashboard-logs",
-		"RETENTION_DAYS": "400"
+		"RETENTION_DAYS": "400",
+		"ADMIN_GROUPS": ""
 	},
 	"triggers": {
 		"crons": ["17 3 * * *"]

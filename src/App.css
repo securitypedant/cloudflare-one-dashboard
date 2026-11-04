@@ -647,3 +647,274 @@ th .swatch {
 		border-top: 1px solid var(--border);
 	}
 }
+
+/* ---------- Grouped navigation ---------- */
+.nav {
+	display: flex;
+	gap: 14px;
+	margin-left: auto;
+	flex-wrap: wrap;
+	align-items: flex-end;
+}
+
+.nav-group {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.nav-group-label {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--muted);
+	padding-left: 6px;
+}
+
+.nav-group.current .nav-group-label {
+	color: var(--accent);
+}
+
+.nav .tabs {
+	margin-left: 0;
+}
+
+.header select:disabled {
+	opacity: 0.4;
+}
+
+/* ---------- Full-width report pages ---------- */
+.page {
+	flex: 1;
+	overflow: auto;
+	padding: 16px 20px 40px;
+}
+
+.page .stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.page .stat {
+	min-width: 150px;
+}
+
+.stat.score .stat-value {
+	font-size: 34px;
+}
+
+.grid-2,
+.grid-3 {
+	display: grid;
+	gap: 18px;
+}
+
+.grid-2 {
+	grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+.grid-3 {
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.plain-list {
+	margin: 0;
+	padding-left: 18px;
+	font-size: 12px;
+	line-height: 1.7;
+}
+
+.severity {
+	display: inline-block;
+	padding: 0 6px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: capitalize;
+	border: 1px solid;
+	border-radius: 999px;
+	white-space: nowrap;
+}
+
+.permission-note {
+	font-size: 12px;
+	color: #fbbf24;
+}
+
+.permission-note code,
+.detail code {
+	font-size: 11px;
+	padding: 0 4px;
+	border-radius: 3px;
+	background: var(--panel-2);
+}
+
+.link-button {
+	padding: 0 4px 0 0;
+	border: none;
+	background: none;
+	color: #93c5fd;
+	font: inherit;
+	cursor: pointer;
+	text-align: left;
+}
+
+.link-button:hover {
+	text-decoration: underline;
+}
+
+/* ---------- DataTable ---------- */
+.datatable-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+.datatable-toolbar input[type="search"] {
+	flex: 1;
+	min-width: 200px;
+	padding: 5px 8px;
+	color: var(--text-h);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--panel-2);
+}
+
+.datatable-count {
+	margin-left: auto;
+	font-size: 12px;
+}
+
+.datatable-scroll {
+	overflow-x: auto;
+}
+
+.table th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.table th.sortable:hover {
+	color: var(--text-h);
+}
+
+.sort-arrow {
+	font-size: 9px;
+}
+
+.clickable-row {
+	cursor: pointer;
+}
+
+.detail-row td {
+	background: var(--panel-2);
+}
+
+.detail p {
+	margin: 4px 0 8px;
+	font-size: 12px;
+}
+
+/* ---------- Day charts ---------- */
+.day-chart {
+	display: flex;
+	align-items: flex-end;
+	gap: 2px;
+	height: 90px;
+	padding: 4px 0;
+}
+
+.day-bar {
+	flex: 1;
+	display: flex;
+	flex-direction: column-reverse;
+	height: 100%;
+	min-width: 3px;
+	padding: 0;
+	border: none;
+	border-radius: 2px 2px 0 0;
+	background: transparent;
+}
+
+.day-bar span {
+	display: block;
+	width: 100%;
+}
+
+.day-chart.clickable .day-bar {
+	cursor: pointer;
+}
+
+.day-chart.clickable .day-bar:hover,
+.day-bar.picked {
+	background: rgba(147, 197, 253, 0.15);
+}
+
+.bar-row-track.stacked {
+	display: flex;
+}
+
+.bar-row-track.stacked span {
+	display: block;
+}
+
+/* ---------- Audit diff ---------- */
+.diff {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+}
+
+.diff pre {
+	max-height: 320px;
+	margin: 0;
+	padding: 8px;
+	overflow: auto;
+	font-size: 11px;
+	line-height: 1.45;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: #0b1220;
+}
+
+.diff-head {
+	margin-bottom: 4px;
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.diff-del {
+	background: rgba(248, 113, 113, 0.15);
+}
+
+.diff-add {
+	background: rgba(74, 222, 128, 0.15);
+}
+
+/* ---------- User lookup ---------- */
+.user-search {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 14px;
+}
+
+.user-search input {
+	flex: 1;
+	max-width: 420px;
+	padding: 6px 10px;
+	color: var(--text-h);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--panel-2);
+}
+
+.user-title {
+	margin: 0 0 12px;
+	font-size: 18px;
+	color: var(--text-h);
+}
