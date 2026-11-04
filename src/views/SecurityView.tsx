@@ -4,7 +4,7 @@ import type { MapMode, Pop, RangeId, ReportResponse, ReportRow, TrafficPoint } f
 import { TrafficMap, type MapLayer } from "../components/TrafficMap.tsx";
 import { BarRow, Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
-import { escapeHtml, formatShare, formatValue } from "../lib/format.ts";
+import { formatShare, formatValue } from "../lib/format.ts";
 
 const BLOCK_COLOR = "#f87171";
 const DLP_COLOR = "#fb923c";
@@ -121,9 +121,10 @@ export function SecurityView({ range, pops }: { range: RangeId; pops: Pop[] }) {
 		const v = locationMap.get(key);
 		const name = effectiveMode === "pop" ? byIata.get(key)?.city : COUNTRIES[key]?.name;
 		if (!v) return null;
-		return `<strong>${escapeHtml(name ?? key)}</strong><br>${escapeHtml(metric.label)}: ${formatValue(v.hits, metric.unit)}${
-			isRate(metricId) && v.all ? ` (${formatShare(v.hits / v.all)} of traffic)` : ""
-		}`;
+		return {
+			title: name ?? key,
+			lines: [`${metric.label}: ${formatValue(v.hits, metric.unit)}${isRate(metricId) && v.all ? ` (${formatShare(v.hits / v.all)} of traffic)` : ""}`],
+		};
 	};
 
 	// Categories: all DNS, or blocked DNS only; for the selected country when one is selected.

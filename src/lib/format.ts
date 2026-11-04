@@ -22,9 +22,6 @@ export function formatValue(value: number, unit: Unit): string {
 	return unit === "bytes" ? formatBytes(value) : `${compact.format(value)} ${unit}`;
 }
 
-export const escapeHtml = (s: string) =>
-	s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
 export const formatKm = (km: number) => `${Math.round(km).toLocaleString()} km`;
 
 /** "▲12%", "▼8%", "new", or "" when there's nothing to compare. */

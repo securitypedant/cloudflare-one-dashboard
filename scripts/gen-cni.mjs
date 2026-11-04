@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Generates shared/cni.ts from the public Direct CNI locations table:
 //   https://developers.cloudflare.com/network-interconnect/locations/
-// Re-run when Cloudflare updates the list:  node scripts/gen-cni.mjs
+// Re-run when Cloudflare updates the list:  node scripts/gen-cni.mjs (inputs are hash-pinned in scripts/data-sources.lock.json; add --update to accept upstream changes)
 import { writeFileSync } from "node:fs";
+import { fetchPinnedText } from "./lib/pinned.mjs";
 
-const md = await (await fetch("https://developers.cloudflare.com/network-interconnect/locations/index.md")).text();
+const md = await fetchPinnedText("https://developers.cloudflare.com/network-interconnect/locations/index.md");
 
 const sites = [];
 let diverse = false;

@@ -6,12 +6,12 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fetchPinned } from "./lib/pinned.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "geonames-"));
 const zip = join(dir, "cities15000.zip");
-const res = await fetch("https://download.geonames.org/export/dump/cities15000.zip");
-if (!res.ok) throw new Error(`GeoNames download failed: HTTP ${res.status}`);
-writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+const archive = await fetchPinned("https://download.geonames.org/export/dump/cities15000.zip");
+writeFileSync(zip, archive);
 const tsv = execFileSync("unzip", ["-p", zip], { maxBuffer: 64 * 1024 * 1024 }).toString("utf8");
 
 // Columns: 0 id, 1 name, 2 asciiname, 4 lat, 5 lon, 8 country, 10 admin1, 14 population

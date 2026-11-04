@@ -196,4 +196,8 @@ export interface Vendor {
 
 export interface ApiError {
 	error: string;
+	/** Stable machine-readable code (bad_request, unauthorized, misconfigured, rate_limited, upstream_error, ...). */
+	code?: string;
+	/** Only for bad_request: which parameter was rejected. */
+	detail?: string;
 }

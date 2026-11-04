@@ -1,5 +1,6 @@
 import { COUNTRIES } from "../shared/countries.ts";
 import { graphql } from "./graphql.ts";
+import { publicErrorMessage } from "./http.ts";
 import { getCoverage, isCovered, logpushSourceFor, queryAggregates, queryAggregateSeries } from "./logpush.ts";
 import {
 	DATASETS,
@@ -271,7 +272,7 @@ export async function fetchTraffic(opts: TrafficOptions): Promise<TrafficRespons
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		console.error(JSON.stringify({ msg: "graphql layer query failed", dataset, mode, source, rangeId, offset, error }));
-		return respond({ status: "error", source, error });
+		return respond({ status: "error", source, error: publicErrorMessage(err) });
 	}
 }
 
@@ -354,6 +355,6 @@ export async function fetchTimeline(opts: TrafficOptions): Promise<TimelineRespo
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		console.error(JSON.stringify({ msg: "graphql timeline failed", dataset, mode, source, rangeId, error }));
-		return { ...base, frames: [], layer: { status: "error", source, error } };
+		return { ...base, frames: [], layer: { status: "error", source, error: publicErrorMessage(err) } };
 	}
 }

@@ -1,4 +1,5 @@
 import { graphql } from "./graphql.ts";
+import { publicErrorMessage } from "./http.ts";
 import { fetchSplittingWindow, RANGE_ROLLUP, resolveRange, type Rollup } from "./traffic.ts";
 import type { RangeId, ReportId, ReportResponse, ReportRow } from "../shared/types.ts";
 
@@ -160,6 +161,6 @@ export async function fetchReport(token: string, accountId: string, id: ReportId
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		console.error(JSON.stringify({ msg: "report query failed", id, source, rangeId, error }));
-		return { ...base, rows: [], error };
+		return { ...base, rows: [], error: publicErrorMessage(err) };
 	}
 }

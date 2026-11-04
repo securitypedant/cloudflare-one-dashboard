@@ -48,12 +48,30 @@ Logpush jobs ──▶ R2 cf1-dashboard-logs/logpush/<dataset>/<YYYYMMDD>/*.log.
                   ▼
                D1 cf1-dashboard: traffic_hourly (counts/sums), metric_hourly (DEX averages as n + total),
                                  user_location_hourly (city × ISP × POP, no IPs or device IDs),
-                                 ingested_objects, logpush_sources
+                                 ingested_objects, logpush_sources, dead_letters
 ```
 
-- Raw logs expire from R2 after 30 days (lifecycle rule `expire-raw-logpush`). The D1 aggregates are kept.
-- Ingestion status: `GET /api/logpush/status`.
+- Notifications are accepted only for create actions (`PutObject`, `CopyObject`, `CompleteMultipartUpload`) on the bucket named in `LOGPUSH_BUCKET`, and only for keys `logpush/<supported dataset>/….log.gz`. Restrict write access to the bucket to the Logpush R2 token: anything that can write there can add data to the dashboard.
+- Ingestion limits (`LIMITS` in `worker/logpush.ts`): 256 MiB compressed object, 2 GiB decompressed, 1 MiB per line, 100k distinct aggregate rows per object, 128 characters per key string. An object over a limit is rejected without retries and recorded in `dead_letters`.
+- Retention: a daily cron (`17 3 * * *`) deletes hourly aggregates older than `RETENTION_DAYS` (default 400), `ingested_objects` rows older than 45 days, and dead letters older than 90 days, and moves `logpush_sources.first_record` forward to the cutoff. Raw logs expire from R2 after 30 days (lifecycle rule `expire-raw-logpush`).
+- Ingestion status: `GET /api/logpush/status` (coverage per dataset plus the dead-letter count).
 - Dataset-to-field mapping: `LOGPUSH_SOURCES` in `worker/logpush.ts`.
+
+### Replaying failed objects
+
+Objects that exhausted their queue retries (consumed from `cf1-dashboard-logpush-dlq`) or were rejected by a limit are listed in D1:
+
+```shell
+npx wrangler d1 execute cf1-dashboard --remote --command "SELECT key, reason, attempts, datetime(received_at, 'unixepoch') FROM dead_letters ORDER BY received_at DESC"
+```
+
+After fixing the cause, re-trigger ingestion by re-writing the object, which fires a new event notification. Failed objects were never recorded in `ingested_objects`, so they are not treated as duplicates:
+
+```shell
+npx wrangler r2 object get cf1-dashboard-logs/<key> --file /tmp/obj.log.gz --remote
+npx wrangler r2 object put cf1-dashboard-logs/<key> --file /tmp/obj.log.gz --remote
+npx wrangler d1 execute cf1-dashboard --remote --command "DELETE FROM dead_letters WHERE key = '<key>'"
+```
 
 ### Create the Logpush jobs (Cloudflare dashboard)
 
@@ -84,7 +102,17 @@ Logpush pricing: the first 25 GB per month to R2 is included, then $0.03/GB ([pr
 
 - One GraphQL query per view, fetched only when needed, using [account-based rate limiting](https://developers.cloudflare.com/analytics/graphql-api/account-based-rate-limiting/).
 - If a query "would read too much data", the window is split in half on rollup boundaries, up to 16 sub-windows.
-- Responses are cached by [Workers Cache](https://developers.cloudflare.com/workers/cache/): 2 minutes for Logpush answers, 5–60 minutes for GraphQL. Errors are not cached.
+- Results are cached in the colo's Cache API by the Worker itself, after the Access check: 2 minutes for Logpush answers, 5–60 minutes for GraphQL, 24 hours for POPs, vendors and categories. Responses to browsers are `private, no-store`, and errors are not cached.
+- Query parameters are strictly validated: unknown or duplicate parameters return 400, so the cache key can't be varied to force fresh GraphQL queries.
+- After a rate-limit response, GraphQL calls stop for 60 seconds (circuit breaker) and the API returns `rate_limited`.
+
+## Security model
+
+- **Authentication:** every `/api/*` request must carry a valid Cloudflare Access JWT (`Cf-Access-Jwt-Assertion` header or `CF_Authorization` cookie) for the application set in `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`. The signature, issuer, audience and expiry are verified against the team's published keys. If either var is missing, the API fails closed (`misconfigured`). `ALLOW_UNAUTHENTICATED=true` (only in `.dev.vars`) skips the check for `localhost` requests and has no effect on any other hostname.
+- **Errors:** responses carry fixed codes (`bad_request`, `unauthorized`, `misconfigured`, `rate_limited`, `upstream_error`). Upstream and D1 error text goes to Worker logs only.
+- **Upstream data:** responses from speed.cloudflare.com, sasecloudmap.com and the Cloudflare API are read with byte limits, validated, and only the validated result is cached. Vendor lists are fetched with at most 3 requests in flight.
+- **UI:** map popups are built with DOM APIs (no HTML strings). `public/_headers` sets a CSP (`default-src 'self'`, `frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
+- **Local dev:** `vite.config.ts` denies `.dev.vars*` and `wrangler.jsonc` (in addition to Vite's defaults) so the dev server never serves them.
 
 ## Generated data
 
@@ -94,12 +122,17 @@ node scripts/gen-cni.mjs           # shared/cni.ts: Direct CNI facilities (v1/v2
 node scripts/gen-cities.mjs        # worker/data/cities.ts: GeoNames cities15000 for placing DEX user cities (needs `unzip`)
 ```
 
+Inputs are hash-pinned in `scripts/data-sources.lock.json`: if upstream data changed, the generator stops. Review the change, then re-run with `--update` to accept it.
+
 Regional Services regions (`shared/regions.ts`) are the country-based managed regions from the [region support](https://developers.cloudflare.com/data-localization/region-support/) page. Certification-based regions (FedRAMP, IRAP, ISO 27001), US state regions and custom regions aren't modelled.
 
 ## Layout
 
 ```
-worker/index.ts      fetch (API) + queue (Logpush ingestion) handlers
+worker/index.ts      fetch (API), queue (Logpush ingestion + DLQ) and scheduled (retention) handlers
+worker/access.ts     Cloudflare Access JWT verification
+worker/http.ts       strict parameter parsing, error codes, response headers, post-auth result cache
+worker/upstream.ts   byte-limited JSON reads, validated-value cache, bounded concurrency
 worker/logpush.ts    Logpush field mapping, streaming aggregation, D1 writes/reads, coverage
 worker/traffic.ts    traffic map: hybrid read path, previous-period offsets, timeline frames
 worker/reports.ts    whitelisted GraphQL reports (/api/report)
@@ -118,7 +151,7 @@ scripts/             dev-token.sh and data generators
 ```shell
 npm install
 cp wrangler.example.jsonc wrangler.jsonc   # then fill in <YOUR_ACCOUNT_ID>, <YOUR_D1_DATABASE_ID> and the domain
-npm run dev:token   # writes .dev.vars using your wrangler OAuth token (re-run on 401s; other wrangler commands rotate it)
+DASHBOARD_API_TOKEN=<scoped token> npm run dev:token   # writes .dev.vars (without the var it falls back to your broad wrangler OAuth token)
 npm run dev         # http://localhost:5173 (local D1; GraphQL views use the real account)
 npm test
 npm run typecheck
@@ -138,11 +171,11 @@ The Wrangler OAuth token has no Zero Trust scope, so category names show as IDs 
    npx wrangler r2 bucket notification create cf1-dashboard-logs --event-type object-create --queue cf1-dashboard-logpush --prefix logpush/ --suffix .log.gz
    npx wrangler r2 bucket lifecycle add cf1-dashboard-logs expire-raw-logpush logpush/ --expire-days 30 --force
    ```
-2. Set `CLOUDFLARE_ACCOUNT_ID` in `wrangler.jsonc` and store an **account API token** with **Account Analytics: Read** and **Zero Trust: Read** (category names):
+2. Create the Cloudflare Access application for the dashboard hostname first. Then set `CLOUDFLARE_ACCOUNT_ID`, `ACCESS_TEAM_DOMAIN` (`<team>.cloudflareaccess.com`) and `ACCESS_AUD` (the application's Audience tag) in `wrangler.jsonc`. Store an **account API token** with **Account Analytics: Read** and **Zero Trust: Read** (category names):
    `npx wrangler secret put CLOUDFLARE_API_TOKEN`
 3. `npm run deploy`
 4. Create the Logpush jobs (above).
-5. Expose it only through a custom domain protected by a Cloudflare Access application (`routes` in `wrangler.jsonc`; create the Access application first). `workers_dev` and `preview_urls` stay off. The API returns the account's analytics and shares responses through Workers Cache.
+5. Serve it only through the Access-protected custom domain (`routes` in `wrangler.jsonc`). `workers_dev` and `preview_urls` stay off. The Worker also verifies the Access JWT itself, so a missing or misconfigured Access application fails closed instead of exposing data.
 
 ## Data attributions
 

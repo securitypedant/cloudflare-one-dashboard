@@ -1,3 +1,5 @@
+import { readJson } from "./upstream.ts";
+
 interface Category {
 	id: number;
 	name: string;
@@ -12,7 +14,7 @@ export async function fetchCategories(token: string, accountId: string): Promise
 	const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/gateway/categories`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
-	const body = (await res.json().catch(() => null)) as { success?: boolean; result?: Category[]; errors?: { message: string }[] } | null;
+	const body = await readJson<{ success?: boolean; result?: Category[]; errors?: { message: string }[] }>(res, 2 * 1024 * 1024).catch(() => null);
 	if (!res.ok || !body?.success || !body.result) {
 		const detail = body?.errors?.map((e) => e.message).join("; ");
 		throw new Error(`Gateway categories API returned HTTP ${res.status}${detail ? `: ${detail}` : ""} (token needs Zero Trust: Read)`);
@@ -20,7 +22,7 @@ export async function fetchCategories(token: string, accountId: string): Promise
 	const names: Record<number, string> = {};
 	const walk = (cats: Category[]) => {
 		for (const c of cats) {
-			names[c.id] = c.name;
+			if (typeof c?.id === "number" && typeof c.name === "string") names[c.id] = c.name.slice(0, 100);
 			if (c.subcategories) walk(c.subcategories);
 		}
 	};

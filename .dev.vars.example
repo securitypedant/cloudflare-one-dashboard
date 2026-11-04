@@ -1,5 +1,9 @@
-# Account-scoped API token with Account > Account Analytics > Read.
-# Or run `npm run dev:token` to use your `wrangler login` OAuth token.
+# Account-scoped API token with Account Analytics: Read (+ Zero Trust: Read for category names).
+# Prefer a scoped token: DASHBOARD_API_TOKEN=<token> npm run dev:token
+# (falls back to your `wrangler login` OAuth token, which has much broader access).
 CLOUDFLARE_API_TOKEN=
 # Optional: override the account in wrangler.jsonc for local dev.
 # CLOUDFLARE_ACCOUNT_ID=
+# Local dev only: skip the Cloudflare Access JWT check for requests to localhost.
+# Has no effect on any other hostname, so it cannot disable the check in production.
+ALLOW_UNAUTHENTICATED=true

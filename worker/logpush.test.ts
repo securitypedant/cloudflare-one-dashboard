@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
 	Aggregator,
 	buildStatements,
+	byteLimit,
+	IngestLimitError,
 	isCovered,
+	LIMITS,
 	LOGPUSH_SOURCES,
 	logpushSourceFor,
+	purgeOldData,
 	readLines,
+	rejectNotification,
 	sourceFromKey,
 	toUnixSeconds,
 	type SourceCoverage,
@@ -110,6 +115,79 @@ describe("Aggregator locations (DEX device state)", () => {
 		const rows = [...agg.locationRows.values()];
 		expect(rows).toHaveLength(1);
 		expect(rows[0]).toMatchObject({ country: "FR", state: "ARA", city: "Lyon", isp: "Orange", colo: "MRS", samples: 3, latN: 2, latTotal: 30 });
+	});
+});
+
+describe("ingestion hardening", () => {
+	it("only accepts own dataset keys (no prototype properties)", () => {
+		expect(sourceFromKey("logpush/constructor/20261103/x.log.gz")).toBeNull();
+		expect(sourceFromKey("logpush/toString/20261103/x.log.gz")).toBeNull();
+		expect(sourceFromKey("logpush/gateway_dns/20261103/x.log.gz")).toBe("gateway_dns");
+	});
+
+	it("rejects notifications for other buckets, non-create actions and malformed bodies", () => {
+		const ok = { account: "a", action: "PutObject", bucket: "logs", object: { key: "logpush/gateway_dns/x.log.gz" }, eventTime: "" };
+		expect(rejectNotification(ok, "logs")).toBeNull();
+		expect(rejectNotification({ ...ok, action: "CompleteMultipartUpload" }, "logs")).toBeNull();
+		expect(rejectNotification({ ...ok, bucket: "other" }, "logs")).toMatch(/different bucket/);
+		expect(rejectNotification({ ...ok, action: "DeleteObject" }, "logs")).toMatch(/ignored action/);
+		expect(rejectNotification(undefined, "logs")).toMatch(/malformed/);
+		expect(rejectNotification(ok, undefined)).toMatch(/not configured/);
+	});
+
+	it("truncates record-derived keys and caps distinct aggregate rows", () => {
+		const agg = new Aggregator(LOGPUSH_SOURCES.gateway_dns);
+		agg.add({ Datetime: "2026-11-03T10:00:00Z", ColoCode: "x".repeat(1000), SrcIPCountryCode: "GB" });
+		expect([...agg.rows.values()][0].key.length).toBe(LIMITS.maxKeyLength);
+		const saved = LIMITS.maxAggregateRows;
+		LIMITS.maxAggregateRows = 10;
+		try {
+			expect(() => {
+				for (let i = 0; i < 20; i++) agg.add({ Datetime: "2026-11-03T10:00:00Z", ColoCode: `C${i}`, SrcIPCountryCode: `K${i}` });
+			}).toThrow(IngestLimitError);
+		} finally {
+			LIMITS.maxAggregateRows = saved;
+		}
+	});
+
+	it("rejects over-long lines and decompression beyond the byte limit", async () => {
+		const longLine = new ReadableStream<string>({
+			start(c) {
+				c.enqueue("x".repeat(50));
+				c.close();
+			},
+		});
+		await expect(async () => {
+			for await (const line of readLines(longLine, 10)) void line;
+		}).rejects.toBeInstanceOf(IngestLimitError);
+
+		const bytes = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(new Uint8Array(8));
+				c.enqueue(new Uint8Array(8));
+				c.close();
+			},
+		}).pipeThrough(byteLimit(10));
+		const reader = bytes.getReader();
+		await expect((async () => { for (;;) if ((await reader.read()).done) break; })()).rejects.toBeInstanceOf(IngestLimitError);
+	});
+
+	it("purges old data and moves coverage forward to the cutoff", async () => {
+		const sql: { query: string; args: unknown[] }[] = [];
+		const db = {
+			prepare: (query: string) => ({ bind: (...args: unknown[]) => ({ query, args }) }),
+			batch: async (stmts: { query: string; args: unknown[] }[]) => {
+				sql.push(...stmts);
+				return stmts.map(() => ({ meta: { changes: 1 } }));
+			},
+		} as unknown as D1Database;
+		const now = 1_800_000_000;
+		const result = await purgeOldData(db, now, 10);
+		const cutoff = now - 10 * 86400;
+		expect(result.cutoff).toBe(cutoff);
+		expect(sql.find((s) => s.query.startsWith("DELETE FROM user_location_hourly"))?.args).toEqual([cutoff]);
+		expect(sql.find((s) => s.query.startsWith("UPDATE logpush_sources"))?.args).toEqual([cutoff, cutoff]);
+		expect(sql).toHaveLength(6);
 	});
 });
 

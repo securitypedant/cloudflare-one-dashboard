@@ -18,19 +18,24 @@
 	},
 	"upload_source_maps": true,
 	/**
-	 * Workers Cache: API responses set s-maxage so repeat views don't spend GraphQL API budget.
-	 * https://developers.cloudflare.com/workers/cache/
-	 */
-	"cache": {
-		"enabled": true
-	},
-	/**
 	 * The Cloudflare One account whose analytics are displayed.
 	 * The API token is a secret: `npx wrangler secret put CLOUDFLARE_API_TOKEN`
-	 * (Account > Account Analytics > Read on this account).
+	 * (Account Analytics: Read + Zero Trust: Read on this account).
+	 *
+	 * ACCESS_TEAM_DOMAIN / ACCESS_AUD: the Worker verifies the Cloudflare Access JWT on every API
+	 * request and fails closed without them (Zero Trust > Access > Applications > your app > AUD).
+	 * LOGPUSH_BUCKET: queue notifications from any other bucket are ignored.
+	 * RETENTION_DAYS: hourly aggregates older than this are purged daily (cron below).
 	 */
 	"vars": {
-		"CLOUDFLARE_ACCOUNT_ID": "<YOUR_ACCOUNT_ID>"
+		"CLOUDFLARE_ACCOUNT_ID": "<YOUR_ACCOUNT_ID>",
+		"ACCESS_TEAM_DOMAIN": "<YOUR_TEAM>.cloudflareaccess.com",
+		"ACCESS_AUD": "<YOUR_ACCESS_APPLICATION_AUD>",
+		"LOGPUSH_BUCKET": "cf1-dashboard-logs",
+		"RETENTION_DAYS": "400"
+	},
+	"triggers": {
+		"crons": ["17 3 * * *"]
 	},
 	/**
 	 * The API exposes account analytics. Keep public URLs off until the Worker is reachable only
@@ -74,6 +79,12 @@
 				"max_batch_timeout": 30,
 				"max_retries": 5,
 				"dead_letter_queue": "cf1-dashboard-logpush-dlq"
+			},
+			{
+				// Records dead-lettered objects in D1 (dead_letters) so they can be inspected and replayed.
+				"queue": "cf1-dashboard-logpush-dlq",
+				"max_batch_size": 10,
+				"max_batch_timeout": 30
 			}
 		]
 	}

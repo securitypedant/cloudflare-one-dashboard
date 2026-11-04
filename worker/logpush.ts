@@ -152,7 +152,7 @@ export function logpushSourceFor(dataset: DatasetId, mode: MapMode): LogpushSour
 /** Objects are written by Logpush to `logpush/<dataset>/<YYYYMMDD>/<start>_<end>_<hash>.log.gz`. */
 export function sourceFromKey(key: string): LogpushSource | null {
 	const match = /^logpush\/([a-z_]+)\/.+\.log\.gz$/.exec(key);
-	return match && match[1] in LOGPUSH_SOURCES ? (match[1] as LogpushSource) : null;
+	return match && Object.hasOwn(LOGPUSH_SOURCES, match[1]) ? (match[1] as LogpushSource) : null;
 }
 
 /** Accepts RFC 3339 strings and Unix seconds / milliseconds / nanoseconds. */
@@ -198,6 +198,24 @@ export interface LocationRow {
 	latTotal: number;
 }
 
+/** Ingestion limits: an object that exceeds them is rejected (not retried) and recorded as a dead letter. */
+export const LIMITS = {
+	/** Compressed object size. Logpush files are typically a few MB. */
+	maxObjectBytes: 256 * 1024 * 1024,
+	/** Decompressed bytes per object. */
+	maxDecompressedBytes: 2 * 1024 * 1024 * 1024,
+	/** Bytes in one NDJSON line. */
+	maxLineBytes: 1024 * 1024,
+	/** Distinct aggregate rows (all tables) per object; bounds memory and D1 batch size. */
+	maxAggregateRows: 100_000,
+	/** Characters kept from any record string used as a key. */
+	maxKeyLength: 128,
+};
+
+export class IngestLimitError extends Error {}
+
+const keyText = (v: unknown) => String(v ?? "").trim().slice(0, LIMITS.maxKeyLength);
+
 export class Aggregator {
 	readonly rows = new Map<string, AggregateRow>();
 	readonly metricRows = new Map<string, MetricRow>();
@@ -211,6 +229,14 @@ export class Aggregator {
 
 	constructor(spec: SourceSpec) {
 		this.spec = spec;
+	}
+
+	get size() {
+		return this.rows.size + this.metricRows.size + this.locationRows.size;
+	}
+
+	private checkSize() {
+		if (this.size > LIMITS.maxAggregateRows) throw new IngestLimitError(`more than ${LIMITS.maxAggregateRows} distinct aggregate rows`);
 	}
 
 	addLine(line: string) {
@@ -235,7 +261,7 @@ export class Aggregator {
 		this.lastRecord = Math.max(this.lastRecord, ts);
 		const hour = ts - (ts % 3600);
 		for (const out of this.spec.outputs) {
-			const key = String(record[out.keyField] ?? "").trim().toUpperCase();
+			const key = keyText(record[out.keyField]).toUpperCase();
 			const value = out.value ? out.value(record) : 1;
 			const id = `${out.dataset}\t${out.dimension}\t${hour}\t${key}`;
 			const row = this.rows.get(id);
@@ -245,7 +271,7 @@ export class Aggregator {
 		for (const m of this.spec.metrics ?? []) {
 			const value = m.value(record);
 			if (value === null) continue;
-			const key = String(record[m.keyField] ?? "").trim().toUpperCase();
+			const key = keyText(record[m.keyField]).toUpperCase();
 			const id = `${m.metric}\t${m.dimension}\t${hour}\t${key}`;
 			const row = this.metricRows.get(id);
 			if (row) {
@@ -257,7 +283,7 @@ export class Aggregator {
 		}
 		const loc = this.spec.locations;
 		if (loc) {
-			const str = (f: string) => String(record[f] ?? "").trim();
+			const str = (f: string) => keyText(record[f]);
 			const colo = str(loc.coloField).toUpperCase();
 			const city = str(loc.cityField);
 			if (city && colo && colo !== "NONE") {
@@ -279,11 +305,12 @@ export class Aggregator {
 				this.locationRows.set(id, existing);
 			}
 		}
+		this.checkSize();
 	}
 }
 
-/** Split a text stream into non-empty lines without buffering the whole body. */
-export async function* readLines(stream: ReadableStream<string>): AsyncGenerator<string> {
+/** Split a text stream into non-empty lines without buffering the whole body; rejects over-long lines. */
+export async function* readLines(stream: ReadableStream<string>, maxLineLength = LIMITS.maxLineBytes): AsyncGenerator<string> {
 	const reader = stream.getReader();
 	let rest = "";
 	for (;;) {
@@ -291,9 +318,31 @@ export async function* readLines(stream: ReadableStream<string>): AsyncGenerator
 		if (done) break;
 		const parts = (rest + value).split("\n");
 		rest = parts.pop() ?? "";
-		for (const part of parts) if (part.trim()) yield part;
+		if (rest.length > maxLineLength) {
+			await reader.cancel();
+			throw new IngestLimitError(`line longer than ${maxLineLength} characters`);
+		}
+		for (const part of parts) {
+			if (part.length > maxLineLength) {
+				await reader.cancel();
+				throw new IngestLimitError(`line longer than ${maxLineLength} characters`);
+			}
+			if (part.trim()) yield part;
+		}
 	}
 	if (rest.trim()) yield rest;
+}
+
+/** Pass bytes through, failing once more than `max` have flowed (decompression-bomb guard). */
+export function byteLimit(max: number): TransformStream<Uint8Array, Uint8Array> {
+	let total = 0;
+	return new TransformStream({
+		transform(chunk, controller) {
+			total += chunk.byteLength;
+			if (total > max) controller.error(new IngestLimitError(`decompressed size exceeds ${max} bytes`));
+			else controller.enqueue(chunk);
+		},
+	});
 }
 
 const ROWS_PER_STATEMENT = 20; // 5 bound parameters per row; D1 allows 100 per statement.
@@ -367,7 +416,7 @@ export function buildStatements(db: D1Database, key: string, source: LogpushSour
 
 export type IngestResult =
 	| { status: "ingested"; source: LogpushSource; records: number; invalid: number; rows: number }
-	| { status: "duplicate" | "skipped"; reason: string };
+	| { status: "duplicate" | "skipped" | "rejected"; reason: string };
 
 export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database }, key: string): Promise<IngestResult> {
 	const source = sourceFromKey(key);
@@ -377,13 +426,24 @@ export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database }, key:
 	}
 	const object = await env.LOGS.get(key);
 	if (!object) return { status: "skipped", reason: "object no longer exists" };
+	if (object.size > LIMITS.maxObjectBytes) {
+		await object.body.cancel();
+		throw new IngestLimitError(`object is ${object.size} bytes (limit ${LIMITS.maxObjectBytes})`);
+	}
 
 	const agg = new Aggregator(LOGPUSH_SOURCES[source]);
-	const text = object.body.pipeThrough(new DecompressionStream("gzip")).pipeThrough(new TextDecoderStream());
+	const text = object.body
+		.pipeThrough(new DecompressionStream("gzip"))
+		.pipeThrough(byteLimit(LIMITS.maxDecompressedBytes))
+		.pipeThrough(new TextDecoderStream());
 	for await (const line of readLines(text)) agg.addLine(line);
+	if (agg.records === 0) {
+		// Still recorded as ingested (so it isn't retried forever), but worth an alert: Logpush field config may be wrong.
+		console.warn(JSON.stringify({ msg: "logpush object had no valid records", key, invalid: agg.invalid }));
+	}
 
 	await env.DB.batch(buildStatements(env.DB, key, source, agg, Math.floor(Date.now() / 1000)));
-	return { status: "ingested", source, records: agg.records, invalid: agg.invalid, rows: agg.rows.size };
+	return { status: "ingested", source, records: agg.records, invalid: agg.invalid, rows: agg.size };
 }
 
 /** Body of an R2 event notification message. https://developers.cloudflare.com/r2/buckets/event-notifications/ */
@@ -395,19 +455,98 @@ export interface R2EventNotification {
 	eventTime: string;
 }
 
-export async function handleQueue(batch: MessageBatch<R2EventNotification>, env: { LOGS: R2Bucket; DB: D1Database }) {
+/** R2 actions that create an object. https://developers.cloudflare.com/r2/buckets/event-notifications/ */
+const CREATE_ACTIONS = new Set(["PutObject", "CopyObject", "CompleteMultipartUpload"]);
+
+export interface QueueEnv {
+	LOGS: R2Bucket;
+	DB: D1Database;
+	/** Bucket name the notifications must come from (the R2 binding's bucket). */
+	LOGPUSH_BUCKET?: string;
+}
+
+/** Reasons to ignore a notification before touching R2: wrong bucket, non-create action, malformed body. */
+export function rejectNotification(body: R2EventNotification | undefined, expectedBucket: string | undefined): string | null {
+	if (!body || typeof body.object?.key !== "string") return "malformed notification";
+	if (!CREATE_ACTIONS.has(body.action)) return `ignored action ${String(body.action)}`;
+	if (!expectedBucket) return "LOGPUSH_BUCKET is not configured";
+	if (body.bucket !== expectedBucket) return "notification is for a different bucket";
+	return null;
+}
+
+export async function recordDeadLetter(db: D1Database, key: string, reason: string, attempts: number) {
+	await db
+		.prepare(
+			`INSERT INTO dead_letters (key, reason, attempts, received_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (key) DO UPDATE SET reason = excluded.reason, attempts = excluded.attempts, received_at = excluded.received_at`,
+		)
+		.bind(key.slice(0, 1024), reason.slice(0, 500), attempts, Math.floor(Date.now() / 1000))
+		.run();
+}
+
+export async function handleQueue(batch: MessageBatch<R2EventNotification>, env: QueueEnv) {
+	// Messages that exhausted their retries: record them so operators can see and replay them.
+	if (batch.queue.endsWith("-dlq")) {
+		for (const message of batch.messages) {
+			const key = String(message.body?.object?.key ?? "(unknown)");
+			await recordDeadLetter(env.DB, key, "exhausted retries", message.attempts);
+			console.error(JSON.stringify({ msg: "logpush object dead-lettered", key }));
+			message.ack();
+		}
+		return;
+	}
 	for (const message of batch.messages) {
-		const key = message.body?.object?.key;
+		const rejected = rejectNotification(message.body, env.LOGPUSH_BUCKET);
+		if (rejected) {
+			console.warn(JSON.stringify({ msg: "logpush notification ignored", reason: rejected }));
+			message.ack();
+			continue;
+		}
+		const key = message.body.object.key;
 		try {
 			const result = await ingestObject(env, key);
 			console.log(JSON.stringify({ msg: "logpush object processed", key, ...result }));
 			message.ack();
 		} catch (err) {
 			const error = err instanceof Error ? err.message : String(err);
+			if (err instanceof IngestLimitError) {
+				// Retrying cannot help: record and drop.
+				console.error(JSON.stringify({ msg: "logpush object rejected", key, error }));
+				await recordDeadLetter(env.DB, key, `rejected: ${error}`, message.attempts);
+				message.ack();
+				continue;
+			}
 			console.error(JSON.stringify({ msg: "logpush ingestion failed", key, attempts: message.attempts, error }));
 			message.retry({ delaySeconds: 30 });
 		}
 	}
+}
+
+export async function getDeadLetterCount(db: D1Database): Promise<number> {
+	const row = await db.prepare("SELECT COUNT(*) AS n FROM dead_letters").first<{ n: number }>();
+	return row?.n ?? 0;
+}
+
+/** Default retention for hourly aggregates. */
+export const DEFAULT_RETENTION_DAYS = 400;
+/** Dedup rows only need to outlive the raw objects in R2 (30-day lifecycle rule). */
+const INGESTED_OBJECTS_RETENTION_DAYS = 45;
+const DEAD_LETTER_RETENTION_DAYS = 90;
+
+/** Delete aggregates older than the retention window and keep coverage metadata consistent with it. */
+export async function purgeOldData(db: D1Database, now: number, retentionDays = DEFAULT_RETENTION_DAYS) {
+	const cutoff = now - retentionDays * 86400;
+	const results = await db.batch([
+		db.prepare("DELETE FROM traffic_hourly WHERE hour < ?").bind(cutoff),
+		db.prepare("DELETE FROM metric_hourly WHERE hour < ?").bind(cutoff),
+		db.prepare("DELETE FROM user_location_hourly WHERE hour < ?").bind(cutoff),
+		db.prepare("DELETE FROM ingested_objects WHERE ingested_at < ?").bind(now - INGESTED_OBJECTS_RETENTION_DAYS * 86400),
+		db.prepare("DELETE FROM dead_letters WHERE received_at < ?").bind(now - DEAD_LETTER_RETENTION_DAYS * 86400),
+		// Data before the cutoff is gone, so Logpush no longer covers it.
+		db.prepare("UPDATE logpush_sources SET first_record = ? WHERE first_record < ?").bind(cutoff, cutoff),
+	]);
+	const [traffic, metrics, locations, objects, deadLetters] = results.map((r) => r.meta.changes ?? 0);
+	return { cutoff, traffic, metrics, locations, objects, deadLetters };
 }
 
 export interface SourceCoverage {
@@ -433,6 +572,9 @@ export function isCovered(coverage: SourceCoverage | undefined, start: number, e
 	return coverage.firstRecord <= start && coverage.lastRecord >= Math.min(end, now) - FRESHNESS_SECONDS;
 }
 
+/** Row caps for read queries (largest first), so inflated aggregate tables can't produce unbounded responses. */
+export const READ_LIMITS = { locations: 5000, metrics: 10000, series: 50000, aggregates: 5000 };
+
 /** User city × ISP × data center totals over a window. */
 export async function queryUserLocations(
 	db: D1Database,
@@ -443,9 +585,10 @@ export async function queryUserLocations(
 		.prepare(
 			`SELECT country, state, city, isp, colo, SUM(samples) AS samples, SUM(lat_n) AS lat_n, SUM(lat_total) AS lat_total
 			 FROM user_location_hourly WHERE hour >= ? AND hour < ?
-			 GROUP BY country, state, city, isp, colo`,
+			 GROUP BY country, state, city, isp, colo
+			 ORDER BY samples DESC LIMIT ?`,
 		)
-		.bind(start - (start % 3600), end)
+		.bind(start - (start % 3600), end, READ_LIMITS.locations)
 		.all<{ country: string; state: string; city: string; isp: string; colo: string; samples: number; lat_n: number; lat_total: number }>();
 	return results;
 }
@@ -461,9 +604,10 @@ export async function queryMetrics(
 		.prepare(
 			`SELECT metric, key, SUM(n) AS n, SUM(total) AS total FROM metric_hourly
 			 WHERE dimension = ? AND hour >= ? AND hour < ?
-			 GROUP BY metric, key`,
+			 GROUP BY metric, key
+			 ORDER BY n DESC LIMIT ?`,
 		)
-		.bind(mode, start - (start % 3600), end)
+		.bind(mode, start - (start % 3600), end, READ_LIMITS.metrics)
 		.all<{ metric: MetricId; key: string; n: number; total: number }>();
 	return results;
 }
@@ -481,9 +625,10 @@ export async function queryAggregateSeries(
 		.prepare(
 			`SELECT hour - (hour % ?) AS bucket, key, SUM(value) AS value FROM traffic_hourly
 			 WHERE dataset = ? AND dimension = ? AND hour >= ? AND hour < ?
-			 GROUP BY bucket, key`,
+			 GROUP BY bucket, key
+			 ORDER BY value DESC LIMIT ?`,
 		)
-		.bind(bucketSeconds, dataset, mode, start - (start % 3600), end)
+		.bind(bucketSeconds, dataset, mode, start - (start % 3600), end, READ_LIMITS.series)
 		.all<{ bucket: number; key: string; value: number }>();
 	return results;
 }
@@ -499,9 +644,10 @@ export async function queryAggregates(
 		.prepare(
 			`SELECT key, SUM(value) AS value FROM traffic_hourly
 			 WHERE dataset = ? AND dimension = ? AND hour >= ? AND hour < ?
-			 GROUP BY key`,
+			 GROUP BY key
+			 ORDER BY value DESC LIMIT ?`,
 		)
-		.bind(dataset, mode, start - (start % 3600), end)
+		.bind(dataset, mode, start - (start % 3600), end, READ_LIMITS.aggregates)
 		.all<{ key: string; value: number }>();
 	return new Map(results.map((r) => [r.key, r.value]));
 }

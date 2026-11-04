@@ -4,7 +4,7 @@ import type { DexResponse, MapMode, Pop, RangeId, ReportResponse, TrafficPoint }
 import { TrafficMap, type MapLayer } from "../components/TrafficMap.tsx";
 import { Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
-import { escapeHtml, formatValue } from "../lib/format.ts";
+import { formatValue } from "../lib/format.ts";
 
 /** Latency bands for colouring (ms). */
 const BANDS = [
@@ -69,9 +69,11 @@ export function PerformanceView({ range, pops }: { range: RangeId; pops: Pop[] }
 		const r = rows.find((x) => x.key === key);
 		const d = dex.data?.rows.find((x) => x.key === key);
 		if (!r && !d) return null;
-		return `<strong>${escapeHtml(r?.name ?? d!.key)}</strong>${r ? `<br>TCP handshake ${formatMs(r.ms)} · ${formatValue(r.sessions, "sessions")}` : ""}${
-			d?.httpAvgMs != null ? `<br>DEX HTTP test ${formatMs(d.httpAvgMs)} (${d.httpTests} tests)` : ""
-		}${d?.warpHandshakeAvgMs != null ? `<br>WARP handshake ${formatMs(d.warpHandshakeAvgMs)}` : ""}`;
+		const lines: string[] = [];
+		if (r) lines.push(`TCP handshake ${formatMs(r.ms)} · ${formatValue(r.sessions, "sessions")}`);
+		if (d?.httpAvgMs != null) lines.push(`DEX HTTP test ${formatMs(d.httpAvgMs)} (${d.httpTests} tests)`);
+		if (d?.warpHandshakeAvgMs != null) lines.push(`WARP handshake ${formatMs(d.warpHandshakeAvgMs)}`);
+		return { title: r?.name ?? d!.key, lines };
 	};
 
 	return (

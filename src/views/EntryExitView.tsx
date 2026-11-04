@@ -5,7 +5,8 @@ import type { Pop, RangeId, ReportResponse } from "../../shared/types.ts";
 import { TrafficMap, type MapLayer, type MapLine, type MapMarker } from "../components/TrafficMap.tsx";
 import { BarRow, Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
-import { escapeHtml, formatBytes, formatShare, formatValue } from "../lib/format.ts";
+import { formatBytes, formatShare, formatValue } from "../lib/format.ts";
+import type { PopupLine } from "../lib/popup.ts";
 import { arc } from "../lib/worldGeo.ts";
 
 const ENTRY_COLOR = "#38bdf8";
@@ -99,11 +100,14 @@ export function EntryExitView({ range, pops }: { range: RangeId; pops: Pop[] }) 
 		const exits = sumBy(mine, (x) => x.egress || "?", (x) => x.sessions).slice(0, 3);
 		const ramps = sumBy(mine, (x) => x.onRamp, (x) => x.sessions).slice(0, 3);
 		const cni = cniByMetro.get(key);
-		return `<strong>${escapeHtml(`${p.city} (${key})`)}</strong><br>${formatValue(sessions, "sessions")} enter here<br>Exit: ${exits
-			.map(([e, v]) => `${escapeHtml(e)} ${formatShare(v / sessions)}`)
-			.join(", ")}<br>On-ramp: ${ramps.map(([r, v]) => `${escapeHtml(r)} ${formatShare(v / sessions)}`).join(", ")}${
-			cni ? `<br>CNI: ${cni.map((s) => escapeHtml(s.site)).join(", ")}` : ""
-		}${violatingSet.has(key) ? `<br><span style="color:${VIOLATION}">Outside ${escapeHtml(region!.label)}</span>` : ""}`;
+		const lines: PopupLine[] = [
+			`${formatValue(sessions, "sessions")} enter here`,
+			`Exit: ${exits.map(([e, v]) => `${e} ${formatShare(v / sessions)}`).join(", ")}`,
+			`On-ramp: ${ramps.map(([r, v]) => `${r} ${formatShare(v / sessions)}`).join(", ")}`,
+		];
+		if (cni) lines.push(`CNI: ${cni.map((s) => s.site).join(", ")}`);
+		if (violatingSet.has(key)) lines.push({ text: `Outside ${region!.label}`, color: VIOLATION });
+		return { title: `${p.city} (${key})`, lines };
 	};
 
 	return (

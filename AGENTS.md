@@ -5,7 +5,7 @@ Cloudflare One customer dashboard: a single Worker (Vite + React + `@cloudflare/
 ## Commands
 
 ```shell
-npm run dev:token   # .dev.vars from `wrangler auth token` (OAuth token is rotated by other wrangler commands; re-run on 401)
+npm run dev:token   # .dev.vars (DASHBOARD_API_TOKEN=<scoped token> preferred; else wrangler OAuth token, rotated by other wrangler commands) + ALLOW_UNAUTHENTICATED=true
 npm run dev         # vite dev server, http://localhost:5173 (local D1; GraphQL views hit the real account)
 npm test            # vitest (vitest.config.ts; does not load the Cloudflare plugin)
 npm run typecheck   # tsc -b (app, worker, node projects)
@@ -29,4 +29,6 @@ npx wrangler d1 migrations apply cf1-dashboard --remote   # after adding a migra
 - Worker imports use explicit `.ts` extensions (`module: nodenext`); `erasableSyntaxOnly` forbids constructor parameter properties.
 - `workers_dev` and `preview_urls` are off. Don't enable public URLs unless the Worker is behind Cloudflare Access.
 - Never commit `.dev.vars`, and never print tokens.
+- Security invariants (see README "Security model"): every `/api/*` route runs after `authorize()` (Access JWT, fail closed); parse params only with `parseParams` (rejects unknown/duplicate); cache results only via `cached()`/`cachedValue()` (after auth; responses stay `private, no-store`); return `apiError(code)`, never raw upstream/D1 messages; read upstream bodies with `readJson(res, maxBytes)` and validate before caching; build popups as `PopupContent` (no HTML strings, no `setHTML`); keep ingestion `LIMITS` and `READ_LIMITS`.
+- Data generators pin input hashes in `scripts/data-sources.lock.json`; re-run with `--update` only after reviewing upstream changes.
 - `wrangler.jsonc` is gitignored (account ID, D1 ID, domain). Structural config changes go in both `wrangler.jsonc` and `wrangler.example.jsonc`. Generate types with `npm run cf-typegen` (`--strict-vars=false`, so no account values end up in `worker-configuration.d.ts`).

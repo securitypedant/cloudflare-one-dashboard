@@ -6,7 +6,7 @@ import { VendorPicker } from "../components/VendorPicker.tsx";
 import { BarRow, Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
 import { buildFlows, countryCoverage, NEAR_KM, scoreVendors } from "../lib/coverage.ts";
-import { escapeHtml, formatKm, formatShare, formatValue } from "../lib/format.ts";
+import { formatKm, formatShare, formatValue } from "../lib/format.ts";
 import { vendorColor, vendorMarkers, VENDOR_PALETTE } from "../lib/vendors.ts";
 import { arc } from "../lib/worldGeo.ts";
 
@@ -111,16 +111,23 @@ export function CoverageView({ range, pops, vendorIds, onVendorIds }: Props) {
 		const p = byPop.get(key);
 		if (p) {
 			const served = flows.filter((f) => f.pop.iata === key);
-			return `<strong>${escapeHtml(`${p.pop.city} (${key})`)}</strong><br>${formatValue(p.value, source.unit)} from ${served
-				.map((f) => escapeHtml(COUNTRIES[f.country].name))
-				.join(", ")}`;
+			return {
+				title: `${p.pop.city} (${key})`,
+				lines: [`${formatValue(p.value, source.unit)} from ${served.map((f) => COUNTRIES[f.country].name).join(", ")}`],
+			};
 		}
 		const c = countries.find((x) => x.country === key);
 		if (!c) return null;
-		return `<strong>${escapeHtml(c.name)}</strong><br>${formatShare(c.inCountryShare)} served in-country · ${formatValue(c.total, source.unit)}<br>${c.pops
-			.slice(0, 4)
-			.map((p) => `${escapeHtml(p.iata)}${p.country !== c.country ? ` (${escapeHtml(p.country)})` : ""} ${formatShare(p.value / c.total)}`)
-			.join(", ")}`;
+		return {
+			title: c.name,
+			lines: [
+				`${formatShare(c.inCountryShare)} served in-country · ${formatValue(c.total, source.unit)}`,
+				c.pops
+					.slice(0, 4)
+					.map((p) => `${p.iata}${p.country !== c.country ? ` (${p.country})` : ""} ${formatShare(p.value / c.total)}`)
+					.join(", "),
+			],
+		};
 	};
 
 	const toggleVendor = (id: string) => {

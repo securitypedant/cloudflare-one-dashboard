@@ -4,7 +4,8 @@ import { TrafficMap, type MapLayer, type MapLine } from "../components/TrafficMa
 import { VendorPicker } from "../components/VendorPicker.tsx";
 import { BarRow, Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
-import { escapeHtml, formatKm, formatShare } from "../lib/format.ts";
+import { formatKm, formatShare } from "../lib/format.ts";
+import type { PopupLine } from "../lib/popup.ts";
 import { FAR_EXTRA_KM, isFar, summarizeCities, summarizeIsps, vendorDistances, weightedMedian } from "../lib/userLocations.ts";
 import { vendorColor, vendorMarkers, VENDOR_PALETTE } from "../lib/vendors.ts";
 import { arc } from "../lib/worldGeo.ts";
@@ -67,10 +68,13 @@ export function UserLocationsView({ range, pops, vendorIds, onVendorIds }: Props
 	const popupFor = (key: string) => {
 		const c = cities.find((x) => x.key === key);
 		if (!c) return null;
-		return `<strong>${escapeHtml(`${c.city}${c.state ? `, ${c.state}` : ""}, ${c.country}`)}</strong><br>${formatShare(c.samples / locatedSamples)} of WARP device time<br>${c.colos
-			.slice(0, 3)
-			.map((p) => `${escapeHtml(p.colo)} · ${p.distanceKm !== null ? formatKm(p.distanceKm) : "?"} · ${formatMs(p.handshakeAvgMs)}`)
-			.join("<br>")}${c.nearestIata && c.colos[0]?.colo !== c.nearestIata ? `<br>Nearest POP: ${escapeHtml(c.nearestIata)} (${formatKm(c.nearestDistanceKm ?? 0)})` : ""}<br><span class="muted">${escapeHtml(c.isps.slice(0, 3).join(", "))}</span>`;
+		const lines: PopupLine[] = [
+			`${formatShare(c.samples / locatedSamples)} of WARP device time`,
+			...c.colos.slice(0, 3).map((p) => `${p.colo} · ${p.distanceKm !== null ? formatKm(p.distanceKm) : "?"} · ${formatMs(p.handshakeAvgMs)}`),
+		];
+		if (c.nearestIata && c.colos[0]?.colo !== c.nearestIata) lines.push(`Nearest POP: ${c.nearestIata} (${formatKm(c.nearestDistanceKm ?? 0)})`);
+		if (c.isps.length) lines.push({ text: c.isps.slice(0, 3).join(", "), muted: true });
+		return { title: `${c.city}${c.state ? `, ${c.state}` : ""}, ${c.country}`, lines };
 	};
 
 	const toggleVendor = (id: string) => {

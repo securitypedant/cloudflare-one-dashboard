@@ -4,11 +4,12 @@
 // from OurAirports (public domain). Re-run when Cloudflare adds data centers:
 //   node scripts/gen-extra-colos.mjs
 import { writeFileSync } from "node:fs";
+import { fetchPinnedJson, fetchPinnedText } from "./lib/pinned.mjs";
 
-const speed = await (await fetch("https://speed.cloudflare.com/locations", { headers: { referer: "https://speed.cloudflare.com/" } })).json();
+const speed = await fetchPinnedJson("https://speed.cloudflare.com/locations", { headers: { referer: "https://speed.cloudflare.com/" } });
 const known = new Set(speed.map((l) => l.iata));
 
-const status = await (await fetch("https://www.cloudflarestatus.com/api/v2/components.json")).json();
+const status = await fetchPinnedJson("https://www.cloudflarestatus.com/api/v2/components.json");
 const missing = new Map();
 for (const { name } of status.components) {
 	const m = /^(.+?),\s*([^,]+?)\s*-\s*\(([A-Z]{3})\)$/.exec(name);
@@ -38,7 +39,7 @@ const parseRow = (line) => {
 	return out;
 };
 
-const csv = await (await fetch("https://davidmegginson.github.io/ourairports-data/airports.csv")).text();
+const csv = await fetchPinnedText("https://davidmegginson.github.io/ourairports-data/airports.csv");
 const [header, ...rows] = csv.trim().split("\n");
 const col = Object.fromEntries(parseRow(header).map((h, i) => [h, i]));
 const rank = { large_airport: 0, medium_airport: 1, small_airport: 2 };

@@ -1,0 +1,27 @@
+{
+  "https://developers.cloudflare.com/network-interconnect/locations/index.md": {
+    "sha256": "e2af5ff641676f40fe87f389f71a602dd4b7b120a89f59d6c68f46a0ecf5e9cf",
+    "bytes": 14663,
+    "fetched": "2026-11-04"
+  },
+  "https://speed.cloudflare.com/locations": {
+    "sha256": "852cdca54c8b97c7945554d1b429c4ed186e21e248db6cb389d1e4065e28cefa",
+    "bytes": 30386,
+    "fetched": "2026-11-04"
+  },
+  "https://www.cloudflarestatus.com/api/v2/components.json": {
+    "sha256": "6ea7743c65afb88fc20dfea5ae1d343987b618bd3116d9c91f54a22107d07d71",
+    "bytes": 175739,
+    "fetched": "2026-11-04"
+  },
+  "https://davidmegginson.github.io/ourairports-data/airports.csv": {
+    "sha256": "7d619dcdaec1d2b64950632819f8a4984db2983ea9eeab6e917176dfe3f6e498",
+    "bytes": 12756741,
+    "fetched": "2026-11-04"
+  },
+  "https://download.geonames.org/export/dump/cities15000.zip": {
+    "sha256": "1d7cf2e7b0920b5203a5c0f2b3825e5e5d6e721e3802593cb51b438877796847",
+    "bytes": 3365828,
+    "fetched": "2026-11-04"
+  }
+}

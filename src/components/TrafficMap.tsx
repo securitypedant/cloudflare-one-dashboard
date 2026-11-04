@@ -14,7 +14,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import type { FeatureCollection, LineString, Point, Position } from "geojson";
 import type { DatasetId, MapMode, Pop, TrafficPoint, Unit } from "../../shared/types.ts";
-import { escapeHtml, formatShare, formatValue } from "../lib/format.ts";
+import { formatShare, formatValue } from "../lib/format.ts";
+import { renderPopup, type PopupContent } from "../lib/popup.ts";
 import { POP_COLOR } from "../lib/colors.ts";
 import { countriesGeo, MAPPED_COUNTRIES } from "../lib/worldGeo.ts";
 
@@ -176,8 +177,8 @@ interface Props {
 	labels?: MapLabel[];
 	onLabelClick?: (key: string) => void;
 	countryFill?: CountryFill[];
-	/** Custom hover HTML for a location key; defaults to listing each layer's value. Must escape its own text. */
-	popupFor?: (key: string) => string | null;
+	/** Custom hover content for a location key; defaults to listing each layer's value. Rendered as text, never HTML. */
+	popupFor?: (key: string) => PopupContent | null;
 	/** Hide the shading-dataset picker and legend rows (views that draw their own legend). */
 	legend?: React.ReactNode;
 	/** Overlays rendered inside the map area (e.g. the timeline control). */
@@ -242,19 +243,20 @@ const markersGeoJSON = (markers: MapMarker[], shape: "ring" | "diamond"): Featur
 		})),
 });
 
-function locationPopup(layers: MapLayer[], key: string, mode: MapMode): string {
+function locationPopup(layers: MapLayer[], key: string, mode: MapMode): PopupContent | null {
 	const rows = layers.flatMap((layer) => {
 		const p = layer.points.find((x) => x.key === key);
 		return p ? [{ layer, p }] : [];
 	});
-	if (!rows.length) return "";
+	if (!rows.length) return null;
 	const { name } = rows[0].p;
-	const title = escapeHtml(mode === "pop" ? `${name} (${key})` : name);
-	const lines = rows.map(
-		({ layer, p }) =>
-			`<div class="popup-row"><i style="background:${layer.color}"></i>${escapeHtml(layer.label)}: ${formatValue(p.value, layer.unit)} &middot; ${formatShare(p.value / layer.total)}</div>`,
-	);
-	return `<strong>${title}</strong>${lines.join("")}`;
+	return {
+		title: mode === "pop" ? `${name} (${key})` : name,
+		lines: rows.map(({ layer, p }) => ({
+			swatch: layer.color,
+			text: `${layer.label}: ${formatValue(p.value, layer.unit)} · ${formatShare(p.value / layer.total)}`,
+		})),
+	};
 }
 
 export function TrafficMap({
@@ -387,7 +389,7 @@ export function TrafficMap({
 			setReady(true);
 		});
 
-		const showPopup = (lngLat: LngLatLike, html: string) => popup.setLngLat(lngLat).setHTML(html).addTo(map);
+		const showPopup = (lngLat: LngLatLike, content: PopupContent) => popup.setLngLat(lngLat).setDOMContent(renderPopup(content)).addTo(map);
 
 		/** Location key under the cursor: a traffic circle, or a shaded country in "By user location". */
 		const keyAt = (point: PointLike) => {
@@ -404,15 +406,16 @@ export function TrafficMap({
 			const [marker] = map.queryRenderedFeatures(e.point, { layers: ["diamonds", "markers"] });
 			const { layers, mode, popupFor } = latest.current;
 			map.getCanvas().style.cursor = key ? "pointer" : "";
-			const html = key ? (popupFor ? popupFor(key) : locationPopup(layers, key, mode)) : "";
+			const content = key ? (popupFor ? popupFor(key) : locationPopup(layers, key, mode)) : null;
 			if (marker && !(pop && pop.properties.iata === key)) {
-				showPopup(e.lngLat, escapeHtml(String(marker.properties.label)));
+				const [title, ...rest] = String(marker.properties.label).split(": ");
+				showPopup(e.lngLat, { title, lines: rest.length ? [rest.join(": ")] : [] });
 			} else if (pop) {
 				const { city, iata } = pop.properties as { city: string; iata: string };
-				const traffic = iata === key ? html : "";
-				showPopup(e.lngLat, traffic || `<strong>${escapeHtml(`${city} (${iata})`)}</strong><br>Cloudflare data center`);
-			} else if (html) {
-				showPopup(e.lngLat, html);
+				const traffic = iata === key ? content : null;
+				showPopup(e.lngLat, traffic ?? { title: `${city} (${iata})`, lines: ["Cloudflare data center"] });
+			} else if (content) {
+				showPopup(e.lngLat, content);
 			} else {
 				popup.remove();
 			}
