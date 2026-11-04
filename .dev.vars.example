@@ -1,0 +1,5 @@
+# Account-scoped API token with Account > Account Analytics > Read.
+# Or run `npm run dev:token` to use your `wrangler login` OAuth token.
+CLOUDFLARE_API_TOKEN=
+# Optional: override the account in wrangler.jsonc for local dev.
+# CLOUDFLARE_ACCOUNT_ID=

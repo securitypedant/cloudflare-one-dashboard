@@ -1,0 +1,80 @@
+/**
+ * Template: copy to wrangler.jsonc (gitignored) and fill in the <PLACEHOLDERS>.
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cloudflare-one-dashboard",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-11-02",
+	"assets": {
+		"not_found_handling": "single-page-application"
+	},
+	"observability": {
+		"enabled": true,
+		"traces": {
+			"enabled": true
+		}
+	},
+	"upload_source_maps": true,
+	/**
+	 * Workers Cache: API responses set s-maxage so repeat views don't spend GraphQL API budget.
+	 * https://developers.cloudflare.com/workers/cache/
+	 */
+	"cache": {
+		"enabled": true
+	},
+	/**
+	 * The Cloudflare One account whose analytics are displayed.
+	 * The API token is a secret: `npx wrangler secret put CLOUDFLARE_API_TOKEN`
+	 * (Account > Account Analytics > Read on this account).
+	 */
+	"vars": {
+		"CLOUDFLARE_ACCOUNT_ID": "<YOUR_ACCOUNT_ID>"
+	},
+	/**
+	 * The API exposes account analytics. Keep public URLs off until the Worker is reachable only
+	 * through Cloudflare Access (e.g. a custom domain with an Access application).
+	 */
+	"workers_dev": false,
+	"preview_urls": false,
+	// Served only through this hostname. Protect it with a Cloudflare Access application before deploying.
+	"routes": [
+		{
+			"pattern": "dashboard.example.com",
+			"custom_domain": true
+		}
+	],
+	/**
+	 * Logpush ingestion: Logpush writes gzipped NDJSON to R2 under logpush/<dataset>/<date>/,
+	 * R2 event notifications enqueue each new object, and the queue handler aggregates it into D1.
+	 */
+	"r2_buckets": [
+		{
+			"binding": "LOGS",
+			"bucket_name": "cf1-dashboard-logs"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "cf1-dashboard",
+			"database_id": "<YOUR_D1_DATABASE_ID>",
+			"migrations_dir": "migrations"
+			// Add `"remote": true` to read production aggregates in `npm run dev`. The remote proxy runs on
+			// the account's workers.dev subdomain, which is behind Access, so it then also needs
+			// CLOUDFLARE_ACCESS_CLIENT_ID / CLOUDFLARE_ACCESS_CLIENT_SECRET (an Access service token).
+		}
+	],
+	"queues": {
+		"consumers": [
+			{
+				"queue": "cf1-dashboard-logpush",
+				"max_batch_size": 10,
+				"max_batch_timeout": 30,
+				"max_retries": 5,
+				"dead_letter_queue": "cf1-dashboard-logpush-dlq"
+			}
+		]
+	}
+}
