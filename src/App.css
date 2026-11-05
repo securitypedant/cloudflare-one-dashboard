@@ -1017,3 +1017,75 @@ th .swatch {
 .map-filters-hint {
 	font-size: 11px;
 }
+
+/* ---------- Help ---------- */
+.subnav .help-button {
+	margin-left: 10px;
+	padding: 4px 10px;
+	font-size: 12px;
+	color: #93c5fd;
+	border: 1px solid rgba(147, 197, 253, 0.4);
+	border-radius: 999px;
+	background: transparent;
+}
+
+.subnav .help-button:hover {
+	background: rgba(147, 197, 253, 0.12);
+}
+
+.help-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	background: rgba(2, 6, 23, 0.45);
+}
+
+.help-panel {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: min(440px, 100%);
+	padding: 18px 20px 30px;
+	overflow-y: auto;
+	font-size: 13px;
+	line-height: 1.55;
+	border-left: 1px solid var(--border);
+	background: var(--panel);
+	box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
+}
+
+.help-panel header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 6px;
+}
+
+.help-panel h2 {
+	margin: 0;
+	font-size: 17px;
+	color: var(--text-h);
+}
+
+.help-panel h3 {
+	margin: 16px 0 6px;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--muted);
+}
+
+.help-panel ul {
+	margin: 0;
+	padding-left: 18px;
+}
+
+.help-panel li {
+	margin-bottom: 6px;
+}
+
+.help-summary {
+	margin: 0;
+	color: var(--text-h);
+}

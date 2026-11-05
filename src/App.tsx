@@ -15,6 +15,8 @@ import { DevicesView } from "./views/DevicesView.tsx";
 import { TunnelsView } from "./views/TunnelsView.tsx";
 import { ChangesView } from "./views/ChangesView.tsx";
 import { UserView } from "./views/UserView.tsx";
+import { HelpPanel } from "./components/HelpPanel.tsx";
+import { HELP } from "./lib/help.ts";
 import "./App.css";
 
 const RANGE_LABELS: Record<RangeId, string> = { "24h": "Last 24 hours", "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days" };
@@ -83,6 +85,7 @@ export default function App() {
 	const activeGroupDef = GROUPS.find((g) => g.id === activeGroup)!;
 	// Remember the last page opened in each group, so switching groups returns to it.
 	const [lastInGroup, setLastInGroup] = useState<Record<string, TabId>>({});
+	const [helpOpen, setHelpOpen] = useState(false);
 
 	const selectTab = (id: TabId) => {
 		setTab(id);
@@ -130,7 +133,11 @@ export default function App() {
 						{t.label}
 					</button>
 				))}
+				<button className="help-button" onClick={() => setHelpOpen(true)} aria-haspopup="dialog" title="What does this page show?">
+					? Help
+				</button>
 			</nav>
+			{helpOpen && HELP[active] && <HelpPanel topic={HELP[active]} onClose={() => setHelpOpen(false)} />}
 
 			{pops.error && <div className="banner error">Could not load Cloudflare POP locations: {pops.error}</div>}
 			{role === "admin" && me.data && !me.data.adminGroupsConfigured && me.data.email !== "local-dev" && (

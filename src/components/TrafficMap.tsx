@@ -102,8 +102,11 @@ export interface MapLabel {
  */
 const LABEL_CLEAR_PX = 80;
 const LABEL_CLEAR_KM = 300;
-/** Gap (px) between the anchor point and the near edge of a slid badge, bridged by a leader line. */
-const LABEL_GAP_PX = 90;
+/** Space (px) kept between a slid badge and the edge of the POP's traffic circle; minimum leader length. */
+const LABEL_MARGIN_PX = 10;
+const LABEL_MIN_LEADER_PX = 16;
+/** On-screen radius of a traffic circle, matching the "circle-radius" zoom interpolation below. */
+const circleScreenRadius = (radius: number, zoom: number) => radius * (zoom <= 1 ? 1 : zoom >= 6 ? 2.5 : 1 + ((zoom - 1) / 5) * 1.5);
 
 /** A marker on top of the map: hollow ring (e.g. CNI facility) or filled diamond (another vendor's POP). */
 export interface MapMarker {
@@ -517,18 +520,26 @@ export function TrafficMap({
 					marker.setOffset([0, 0]);
 					continue;
 				}
-				// Move away from the nearest POP horizontally; ties go west.
+				// Move away from the nearest POP horizontally (ties go west), just far enough to clear its circle.
 				const side = near.x >= anchor.x - 4 ? "left" : "right";
-				const shift = LABEL_GAP_PX + el.offsetWidth / 2;
+				const [circle] = map.getLayer("traffic-circles") ? map.queryRenderedFeatures(near, { layers: ["traffic-circles"] }) : [];
+				const r = circle ? circleScreenRadius(Number((circle.properties as CircleProps).radius) || 0, map.getZoom()) : 0;
+				// Distance from the anchor to the circle's near edge plus a margin: the badge's edge sits there.
+				const awayFromPop = side === "left" ? anchor.x - near.x : near.x - anchor.x;
+				const gap = Math.max(LABEL_MIN_LEADER_PX, awayFromPop + r + LABEL_MARGIN_PX);
+				const shift = gap + el.offsetWidth / 2;
 				marker.setOffset([side === "left" ? -shift : shift, 0]);
 				el.classList.add(side === "left" ? "slid-left" : "slid-right");
-				leader.style.width = `${LABEL_GAP_PX}px`;
+				leader.style.width = `${gap}px`;
 			}
 		};
 		place();
+		// Circles can only be measured once rendered, so re-place after each render settles too.
 		map.on("zoom", place);
+		map.on("idle", place);
 		return () => {
 			map.off("zoom", place);
+			map.off("idle", place);
 			created.forEach(({ marker }) => marker.remove());
 		};
 	}, [ready, labelKey]);
