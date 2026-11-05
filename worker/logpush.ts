@@ -590,6 +590,45 @@ export function isCovered(coverage: SourceCoverage | undefined, start: number, e
 /** Row caps for read queries (largest first), so inflated aggregate tables can't produce unbounded responses. */
 export const READ_LIMITS = { locations: 5000, metrics: 10000, series: 50000, aggregates: 5000 };
 
+/** User city × data center device time per time bucket (no ISP, to keep series small). */
+export async function queryUserLocationSeries(
+	db: D1Database,
+	start: number,
+	end: number,
+	bucketSeconds: number,
+): Promise<{ bucket: number; country: string; state: string; city: string; colo: string; samples: number; lat_n: number; lat_total: number }[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT hour - (hour % ?) AS bucket, country, state, city, colo, SUM(samples) AS samples, SUM(lat_n) AS lat_n, SUM(lat_total) AS lat_total
+			 FROM user_location_hourly WHERE hour >= ? AND hour < ?
+			 GROUP BY bucket, country, state, city, colo
+			 ORDER BY samples DESC LIMIT ?`,
+		)
+		.bind(bucketSeconds, start - (start % 3600), end, READ_LIMITS.series)
+		.all<{ bucket: number; country: string; state: string; city: string; colo: string; samples: number; lat_n: number; lat_total: number }>();
+	return results;
+}
+
+/** Averaged DEX metrics per location per time bucket. */
+export async function queryMetricSeries(
+	db: D1Database,
+	mode: MapMode,
+	start: number,
+	end: number,
+	bucketSeconds: number,
+): Promise<{ bucket: number; metric: MetricId; key: string; n: number; total: number }[]> {
+	const { results } = await db
+		.prepare(
+			`SELECT hour - (hour % ?) AS bucket, metric, key, SUM(n) AS n, SUM(total) AS total FROM metric_hourly
+			 WHERE dimension = ? AND hour >= ? AND hour < ?
+			 GROUP BY bucket, metric, key
+			 ORDER BY n DESC LIMIT ?`,
+		)
+		.bind(bucketSeconds, mode, start - (start % 3600), end, READ_LIMITS.series)
+		.all<{ bucket: number; metric: MetricId; key: string; n: number; total: number }>();
+	return results;
+}
+
 /** User city × ISP × data center totals over a window. */
 export async function queryUserLocations(
 	db: D1Database,

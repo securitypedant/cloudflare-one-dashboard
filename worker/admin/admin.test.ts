@@ -5,7 +5,7 @@ import { coloToIata, toMagicRows, toTunnelRows } from "./tunnels.ts";
 import { appStatuses } from "./threats.ts";
 import { toAuditEntry } from "./changes.ts";
 import { toDeviceRows } from "./devices.ts";
-import { groupKeys, identityHost, roleFor } from "../rbac.ts";
+import { groupKeys, identityHost, roleFor, slimIdentity } from "../rbac.ts";
 import { flattenCategories } from "../categories.ts";
 import { BadRequestError, EMAIL_PARAM, parseParams } from "../http.ts";
 
@@ -184,5 +184,26 @@ describe("category tree", () => {
 		expect(out[99]).toBeUndefined();
 		expect(Object.keys(out).length).toBeLessThanOrEqual(5);
 		expect(flattenCategories({ not: "an array" })).toEqual({});
+	});
+});
+
+describe("identity slimming", () => {
+	it("keeps display fields and drops raw posture inputs, sessions and IPs", () => {
+		const slim = slimIdentity({
+			email: "a@x.com",
+			groups: [{ id: "g1", name: "Admins" }],
+			idp: { id: "i", type: "cloudflare" },
+			is_warp: true,
+			is_gateway: false,
+			device_id: "dev-1",
+			iat: 1_800_000_000,
+			ip: "203.0.113.9",
+			device_sessions: { s: { last_authenticated: 1 } },
+			devicePosture: { r1: { rule_name: "FileVault", type: "disk_encryption", success: true, input: { secret: "x" } } },
+		});
+		expect(slim).toMatchObject({ email: "a@x.com", is_warp: true, is_gateway: false, device_id: "dev-1", idp: { type: "cloudflare" } });
+		expect(slim.posture).toEqual([{ name: "FileVault", type: "disk_encryption", success: true }]);
+		expect(JSON.stringify(slim)).not.toMatch(/203\.0\.113\.9|device_sessions|secret/);
+		expect(roleFor(slim, "g1")).toBe("admin");
 	});
 });

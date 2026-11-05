@@ -16,6 +16,7 @@ import { TunnelsView } from "./views/TunnelsView.tsx";
 import { ChangesView } from "./views/ChangesView.tsx";
 import { UserView } from "./views/UserView.tsx";
 import { HelpPanel } from "./components/HelpPanel.tsx";
+import { SessionPanel } from "./components/SessionPanel.tsx";
 import { HELP } from "./lib/help.ts";
 import "./App.css";
 
@@ -86,6 +87,7 @@ export default function App() {
 	// Remember the last page opened in each group, so switching groups returns to it.
 	const [lastInGroup, setLastInGroup] = useState<Record<string, TabId>>({});
 	const [helpOpen, setHelpOpen] = useState(false);
+	const [sessionOpen, setSessionOpen] = useState(false);
 
 	const selectTab = (id: TabId) => {
 		setTab(id);
@@ -106,9 +108,12 @@ export default function App() {
 					<p className="muted">
 						Read-only operational view of your account. Make changes in the Cloudflare dashboard
 						{me.data && (
-							<span>
-								{" "}· {me.data.email} ({me.data.role})
-							</span>
+							<>
+								{" · "}
+								<button className="link-button session-link" onClick={() => setSessionOpen(true)} aria-haspopup="dialog" title="Your identity, connection and account">
+									{me.data.email} ({me.data.role})
+								</button>
+							</>
 						)}
 					</p>
 				</div>
@@ -138,6 +143,7 @@ export default function App() {
 				</button>
 			</nav>
 			{helpOpen && HELP[active] && <HelpPanel topic={HELP[active]} onClose={() => setHelpOpen(false)} />}
+			{sessionOpen && <SessionPanel onClose={() => setSessionOpen(false)} />}
 
 			{pops.error && <div className="banner error">Could not load Cloudflare POP locations: {pops.error}</div>}
 			{role === "admin" && me.data && !me.data.adminGroupsConfigured && me.data.email !== "local-dev" && (

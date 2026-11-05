@@ -1,17 +1,22 @@
 import { distanceKm } from "../shared/geo.ts";
 import type { Pop, RangeId, UserLocationRow, UserLocationsResponse } from "../shared/types.ts";
 import { geocodeCity } from "./geocode.ts";
-import { queryUserLocations } from "./logpush.ts";
-import { resolveRange } from "./traffic.ts";
+import { queryUserLocations, queryUserLocationSeries } from "./logpush.ts";
+import { RANGE_ROLLUP, resolveRange } from "./traffic.ts";
 
 /**
  * Where WARP users actually are (Cloudflare's geolocation of their ISP IP, from DEX device state
  * events) and which data center they connect to, with distances to that POP and to the nearest POP.
  */
-export async function fetchUserLocations(db: D1Database, rangeId: RangeId, pops: Pop[]): Promise<UserLocationsResponse> {
+export async function fetchUserLocations(db: D1Database, rangeId: RangeId, pops: Pop[], series = false): Promise<UserLocationsResponse> {
 	const { start, end } = resolveRange(rangeId);
 	const range = { id: rangeId, start: start.toISOString(), end: end.toISOString() };
-	const raw = await queryUserLocations(db, Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000));
+	const bucket = RANGE_ROLLUP[rangeId] === "1d" ? ("day" as const) : ("hour" as const);
+	const s = Math.floor(start.getTime() / 1000);
+	const e = Math.floor(end.getTime() / 1000);
+	const raw: { bucket?: number; country: string; state: string; city: string; isp?: string; colo: string; samples: number; lat_n: number; lat_total: number }[] = series
+		? await queryUserLocationSeries(db, s, e, bucket === "day" ? 86400 : 3600)
+		: await queryUserLocations(db, s, e);
 	if (!raw.length) {
 		const { results } = await db.prepare("SELECT COUNT(*) AS n FROM user_location_hourly").all<{ n: number }>();
 		return { available: (results[0]?.n ?? 0) > 0, range, rows: [] };
@@ -37,10 +42,11 @@ export async function fetchUserLocations(db: D1Database, rangeId: RangeId, pops:
 		const pop = byIata.get(r.colo);
 		const near = loc ? nearest(loc.lat, loc.lon) : null;
 		return {
+			...(r.bucket !== undefined ? { t: new Date(r.bucket * 1000).toISOString() } : {}),
 			country: r.country,
 			state: r.state,
 			city: r.city,
-			isp: r.isp,
+			isp: r.isp ?? "",
 			colo: r.colo,
 			samples: r.samples,
 			handshakeAvgMs: r.lat_n ? r.lat_total / r.lat_n : null,
@@ -51,5 +57,5 @@ export async function fetchUserLocations(db: D1Database, rangeId: RangeId, pops:
 			nearestDistanceKm: near?.km ?? null,
 		};
 	});
-	return { available: true, range, rows: rows.sort((a, b) => b.samples - a.samples) };
+	return { available: true, range, rows: rows.sort((a, b) => b.samples - a.samples), ...(series ? { bucket } : {}) };
 }

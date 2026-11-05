@@ -54,6 +54,12 @@ export const REPORTS: Record<ReportId, ReportSpec> = {
 		avg: [{ field: "tcpHandshakeMs", weight: "sessions" }],
 		order: "sum_sessions_DESC",
 	},
+	entry_onramp: {
+		node: cf1("GatewayNetworkSession"),
+		dimensions: ["ingressColoName", "onRamp"],
+		sum: ["sessions"],
+		order: "sum_sessions_DESC",
+	},
 	sec_dns: { node: cf1("GatewayDns"), dimensions: ["resolverDecision", "country", "coloName"], sum: ["queries"], order: "sum_queries_DESC" },
 	sec_http: {
 		node: cf1("GatewayHttp"),
@@ -137,13 +143,22 @@ export function mergeRows(spec: ReportSpec, raw: RawRow[]): ReportRow[] {
 	return [...merged.values()];
 }
 
-export async function fetchReport(token: string, accountId: string, id: ReportId, rangeId: RangeId): Promise<ReportResponse> {
-	const spec = REPORTS[id];
+/** Rows per query (GraphQL node limit). A window that returns this many may have been cut short. */
+const ROW_LIMIT = 10000;
+
+/**
+ * A report over [start, end). With `series`, each row also carries `dims.datetime`: the hour (1h
+ * rollup, 24h/7d) or day (1d rollup, 30d/90d) it belongs to, for charts over time.
+ */
+export async function fetchReport(token: string, accountId: string, id: ReportId, rangeId: RangeId, series = false): Promise<ReportResponse> {
+	const baseSpec = REPORTS[id];
+	const spec = series ? { ...baseSpec, dimensions: [...baseSpec.dimensions, "datetime"] } : baseSpec;
 	const rollup = RANGE_ROLLUP[rangeId];
 	const { start, end } = resolveRange(rangeId);
 	const source = spec.node(rollup);
-	const base = { id, source, range: { id: rangeId, start: start.toISOString(), end: end.toISOString() } };
+	const base = { id, source, range: { id: rangeId, start: start.toISOString(), end: end.toISOString() }, ...(series ? { bucket: rollup === "1d" ? ("day" as const) : ("hour" as const) } : {}) };
 	const query = buildReportQuery(spec, rollup);
+	let truncated = false;
 	try {
 		const raw = await fetchSplittingWindow(
 			async (from: Date, to: Date) => {
@@ -151,13 +166,14 @@ export async function fetchReport(token: string, accountId: string, id: ReportId
 				const { data, errors } = await graphql<{ viewer: { accounts: { groups: RawRow[] | null }[] } }>(token, query, vars);
 				const rows = data?.viewer.accounts[0]?.groups;
 				if (errors.length || !rows) throw new Error(errors.map((e) => e.message).join("; ") || "No data returned");
+				if (rows.length >= ROW_LIMIT) truncated = true;
 				return rows;
 			},
 			start,
 			end,
 			rollup === "1d" ? DAY : HOUR,
 		);
-		return { ...base, rows: mergeRows(spec, raw) };
+		return { ...base, rows: mergeRows(spec, raw), ...(truncated ? { truncated } : {}) };
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		console.error(JSON.stringify({ msg: "report query failed", id, source, rangeId, error }));

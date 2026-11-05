@@ -10,6 +10,39 @@ export interface MeResponse {
 	adminGroupsConfigured: boolean;
 }
 
+/** The signed-in viewer's own session: identity, how they reach the dashboard, and the account. */
+export interface SessionResponse {
+	viewer: { email: string; role: Role };
+	identity: Section<{
+		idp: string;
+		groups: { id: string; name: string }[];
+		warp: boolean;
+		gateway: boolean;
+		deviceId: string | null;
+		authenticatedAt: string | null;
+		country: string | null;
+		posture: { name: string; type: string; success: boolean }[];
+	} | null>;
+	connection: {
+		ip: string | null;
+		colo: string | null;
+		coloCity: string | null;
+		coloCountry: string | null;
+		/** km from the client's geolocated position to the POP. */
+		distanceKm: number | null;
+		city: string | null;
+		region: string | null;
+		country: string | null;
+		asn: number | null;
+		asOrganization: string | null;
+		rttMs: number | null;
+		httpProtocol: string | null;
+		tlsVersion: string | null;
+	};
+	account: Section<{ id: string; name: string; type: string | null; createdOn: string | null; teamDomain: string | null; teamName: string | null }>;
+	dashboard: { version: string; hostname: string };
+}
+
 /** One report section: data, or why it couldn't load (e.g. a missing token permission). */
 export type Section<T> = { ok: true; data: T } | { ok: false; missingPermission?: string; error: string };
 

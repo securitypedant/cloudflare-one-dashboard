@@ -116,6 +116,7 @@ export const REPORT_IDS = [
 	"coverage_dns",
 	"coverage_sessions",
 	"entry_exit",
+	"entry_onramp",
 	"perf_pop",
 	"perf_country",
 	"sec_dns",
@@ -141,11 +142,17 @@ export interface ReportResponse {
 	range: { id: RangeId; start: string; end: string };
 	rows: ReportRow[];
 	error?: string;
+	/** Series mode: rows carry dims.datetime, bucketed by hour or day. */
+	bucket?: "hour" | "day";
+	/** True when a query hit the row limit, so the smallest rows may be missing. */
+	truncated?: boolean;
 }
 
 export interface DexRow {
 	/** POP IATA code or ISO country code. */
 	key: string;
+	/** Series mode: start of the hour/day bucket (ISO). */
+	t?: string;
 	httpAvgMs: number | null;
 	httpTests: number;
 	httpFailures: number;
@@ -159,9 +166,12 @@ export interface DexResponse {
 	mode: MapMode;
 	range: { id: RangeId; start: string; end: string };
 	rows: DexRow[];
+	bucket?: "hour" | "day";
 }
 
 export interface UserLocationRow {
+	/** Series mode: start of the hour/day bucket (ISO); isp is empty in series rows. */
+	t?: string;
 	country: string;
 	state: string;
 	city: string;
@@ -185,6 +195,7 @@ export interface UserLocationsResponse {
 	available: boolean;
 	range: { id: RangeId; start: string; end: string };
 	rows: UserLocationRow[];
+	bucket?: "hour" | "day";
 }
 
 export interface Vendor {

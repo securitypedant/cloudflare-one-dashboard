@@ -17,6 +17,7 @@ import { fetchThreats } from "./admin/threats.ts";
 import { fetchChanges } from "./admin/changes.ts";
 import { fetchUserDetail, fetchUserList } from "./admin/users.ts";
 import type { MeResponse } from "../shared/admin.ts";
+import { fetchSession } from "./session.ts";
 import { DATASET_IDS, MAP_MODES, RANGE_IDS, REPORT_IDS, type RangeId } from "../shared/types.ts";
 
 const TRAFFIC_CACHE_SECONDS: Record<RangeId, number> = { "24h": 300, "7d": 900, "30d": 3600, "90d": 3600 };
@@ -140,26 +141,26 @@ export default {
 				}
 
 				case "/api/report": {
-					const { params, canonical } = parseParams(url, { id: { values: REPORT_IDS }, range: { values: RANGE_IDS } });
+					const { params, canonical } = parseParams(url, { id: { values: REPORT_IDS }, range: { values: RANGE_IDS }, series: { values: ["1"] as const, optional: true } });
 					const { token, accountId } = requireApiToken(env);
 					return await cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
-						const report = await fetchReport(token, accountId, params.id, params.range);
+						const report = await fetchReport(token, accountId, params.id, params.range, params.series === "1");
 						return { body: report, cacheable: !report.error };
 					});
 				}
 
 				case "/api/dex": {
-					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS }, mode: { values: MAP_MODES } });
+					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS }, mode: { values: MAP_MODES }, series: { values: ["1"] as const, optional: true } });
 					return await cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
-						body: await fetchDex(env.DB, params.mode, params.range),
+						body: await fetchDex(env.DB, params.mode, params.range, params.series === "1"),
 						cacheable: true,
 					}));
 				}
 
 				case "/api/user-locations": {
-					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
+					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS }, series: { values: ["1"] as const, optional: true } });
 					return await cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
-						body: await fetchUserLocations(env.DB, params.range, await fetchPops(ctx)),
+						body: await fetchUserLocations(env.DB, params.range, await fetchPops(ctx), params.series === "1"),
 						cacheable: true,
 					}));
 				}
@@ -178,6 +179,12 @@ export default {
 				case "/api/me": {
 					parseParams(url, NO_PARAMS);
 					return json({ email: viewer.email, role: viewer.role, adminGroupsConfigured: Boolean(env.ADMIN_GROUPS) } satisfies MeResponse);
+				}
+
+				case "/api/session": {
+					parseParams(url, NO_PARAMS);
+					// Per-viewer and per-request (identity, client connection): never cached.
+					return json(await fetchSession(request, env, ctx, viewer, url));
 				}
 
 				case "/api/posture": {
