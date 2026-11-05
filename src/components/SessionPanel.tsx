@@ -77,7 +77,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
 							<Rows
 								rows={[
 									["Email", s.viewer.email],
-									["Dashboard role", <StatusPill key="r" text={s.viewer.role} color={s.viewer.role === "admin" ? "#f6821f" : "#94a3b8"} />],
+									["Dashboard access", <StatusPill key="r" text={s.viewer.role === "admin" ? "full" : "limited"} color={s.viewer.role === "admin" ? "#f6821f" : "#94a3b8"} />],
 								]}
 							/>
 							<SectionView result={s.identity}>

@@ -69,6 +69,7 @@ export function roleFor(identity: Identity, adminGroups: string | undefined): Ro
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean);
 	if (!wanted.length) return "viewer";
+	if (wanted.includes("*")) return "admin";
 	const have = groupKeys(identity);
 	return wanted.some((g) => have.has(g)) ? "admin" : "viewer";
 }

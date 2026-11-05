@@ -47,8 +47,8 @@ const GROUPS = [
 		],
 	},
 	{
-		id: "admin",
-		label: "Admin",
+		id: "account",
+		label: "Account",
 		admin: true,
 		tabs: [
 			{ id: "posture", label: "Posture" },
@@ -115,7 +115,8 @@ export default function App() {
 							<>
 								{" · "}
 								<button className="link-button session-link" onClick={() => setSessionOpen(true)} aria-haspopup="dialog" title="Your identity, connection and account">
-									{me.data.email} ({me.data.role})
+									{me.data.email}
+									{!me.data.openAccess && ` (${me.data.role === "admin" ? "full access" : "limited"})`}
 								</button>
 							</>
 						)}
@@ -161,7 +162,7 @@ export default function App() {
 
 			{pops.error && <div className="banner error">Could not load Cloudflare POP locations: {pops.error}</div>}
 			{role === "admin" && me.data && !me.data.adminGroupsConfigured && me.data.email !== "local-dev" && (
-				<div className="banner">Admin views are hidden for everyone until ADMIN_GROUPS is set in the Worker config.</div>
+				<div className="banner">The Account section is hidden for everyone until ADMIN_GROUPS is set in the Worker config (use "*" to open it to everyone).</div>
 			)}
 
 			{active === "traffic" && <TrafficView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} view={view} />}

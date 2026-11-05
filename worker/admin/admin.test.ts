@@ -153,6 +153,8 @@ describe("roles", () => {
 		expect(roleFor(identity, "finance")).toBe("viewer");
 		expect(roleFor(identity, "")).toBe("viewer");
 		expect(roleFor(identity, undefined)).toBe("viewer");
+		expect(roleFor(identity, "*")).toBe("admin");
+		expect(roleFor({ groups: [] }, " * ")).toBe("admin");
 	});
 });
 

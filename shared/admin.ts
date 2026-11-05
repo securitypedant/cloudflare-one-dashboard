@@ -8,6 +8,8 @@ export interface MeResponse {
 	role: Role;
 	/** True when ADMIN_GROUPS is not configured (so nobody is an admin yet). */
 	adminGroupsConfigured: boolean;
+	/** ADMIN_GROUPS is "*": everyone who passes Access has full access. */
+	openAccess?: boolean;
 }
 
 /** The signed-in viewer's own session: identity, how they reach the dashboard, and the account. */

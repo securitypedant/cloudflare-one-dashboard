@@ -156,7 +156,7 @@ export const HELP: Record<string, HelpTopic> = {
 					"Security threats: blocked DNS queries in security-risk categories such as malware, phishing and command and control.",
 					"Shadow IT: SaaS apps your users reach, with their review status from Cloudflare One's application review. Unapproved or unreviewed apps with uploads deserve a look.",
 					"DLP: requests that matched a DLP profile, by destination. Malware: files blocked by antivirus scanning or the sandbox.",
-					"Admins also see per-user columns and the most targeted users; click a user to open User lookup.",
+					"Per-user columns and the most targeted users are included (unless the dashboard limits per-user detail); click a user to open User lookup.",
 				],
 			},
 			{
@@ -177,7 +177,7 @@ export const HELP: Record<string, HelpTopic> = {
 				points: [
 					"Charts show successful and failed logins over time (hourly for 24h and 7d, daily for 30d and 90d), broken down by country, identity provider or application.",
 					"Below, totals by country, identity provider and application.",
-					"Admins also get a user table (logins, failures, devices, last login), seat counts with seats inactive for 30+ days that could be reclaimed, and applications with no logins.",
+					"A user table (logins, failures, devices, last login), seat counts with seats inactive for 30+ days that could be reclaimed, and applications with no logins (unless the dashboard limits per-user detail).",
 				],
 			},
 			{
@@ -250,7 +250,7 @@ export const HELP: Record<string, HelpTopic> = {
 				heading: "Data and limits",
 				points: [
 					"Cloudflare Tunnel API; Magic WAN health checks from the last 24 hours. Not affected by the time range.",
-					"Visible to every viewer; connector origin IPs are shown to admins only. Cloudflare Tunnel status has no history, so the chart covers Magic WAN only.",
+					"Connector origin IPs are hidden if the dashboard limits per-user and internal detail. Cloudflare Tunnel status has no history, so the chart covers Magic WAN only.",
 				],
 			},
 		],

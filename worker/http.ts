@@ -17,7 +17,7 @@ export type ErrorCode = "bad_request" | "unauthorized" | "forbidden" | "not_foun
 const MESSAGES: Record<ErrorCode, string> = {
 	bad_request: "Invalid request parameters.",
 	unauthorized: "Authentication required.",
-	forbidden: "This view is limited to dashboard admins.",
+	forbidden: "This view needs full access to the dashboard (see ADMIN_GROUPS).",
 	not_found: "Not found.",
 	method_not_allowed: "Method not allowed.",
 	misconfigured: "The dashboard is not configured correctly. Check the Worker logs.",

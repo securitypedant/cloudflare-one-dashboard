@@ -26,8 +26,9 @@
 	 * request and fails closed without them (Zero Trust > Access > Applications > your app > AUD).
 	 * LOGPUSH_BUCKET: queue notifications from any other bucket are ignored.
 	 * RETENTION_DAYS: hourly aggregates older than this are purged daily (cron below).
-	 * ADMIN_GROUPS: comma-separated group names/ids from the Access identity that get the admin view
-	 * (posture, devices, tunnels, change history, per-user pages). Empty = nobody is an admin.
+	 * ADMIN_GROUPS: who gets full access (the Account section and per-user detail). "*" = everyone
+	 * who passes Access; otherwise comma-separated group ids from the Access identity (ids, not names:
+	 * with the Cloudflare login, group names are account names anyone can choose). Empty = nobody.
 	 * DASHBOARD_HOSTNAME: the Access-protected hostname; roles are only looked up there.
 	 */
 	"vars": {

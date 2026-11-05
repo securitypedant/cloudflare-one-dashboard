@@ -150,7 +150,7 @@ export function UserView({ range, email, onEmail }: { range: RangeId; email: str
 							) : null
 						}
 					</SectionView>
-					<p className="footnote">Visible to dashboard admins only. Sources: Access users and devices APIs, Access login and Gateway analytics.</p>
+					<p className="footnote">Sources: Access users and devices APIs, Access login and Gateway analytics.</p>
 				</>
 			)}
 		</main>

@@ -48,6 +48,8 @@ async function authorize(request: Request, env: Env, url: URL): Promise<Response
 		return apiError("unauthorized");
 	}
 	if (!env.ADMIN_GROUPS) return { email, role: "viewer" };
+	// "*" = everyone who passes Access gets full access; no identity lookup needed.
+	if (env.ADMIN_GROUPS.trim() === "*") return { email, role: "admin" };
 	const host = identityHost(url.hostname, env.DASHBOARD_HOSTNAME);
 	if (!host) {
 		console.warn(JSON.stringify({ msg: "request hostname does not match DASHBOARD_HOSTNAME; viewer role" }));
@@ -104,7 +106,7 @@ export default {
 						const c = coverage.find((x) => x.source === source);
 						return {
 							source,
-							// Configured Logpush field lists are operational detail for admins only.
+							// Configured Logpush field lists are operational detail for full-access users only.
 							...(viewer.role === "admin" ? { fields: spec.fields } : {}),
 							firstRecord: c ? new Date(c.firstRecord * 1000).toISOString() : null,
 							lastRecord: c ? new Date(c.lastRecord * 1000).toISOString() : null,
@@ -178,7 +180,7 @@ export default {
 
 				case "/api/me": {
 					parseParams(url, NO_PARAMS);
-					return json({ email: viewer.email, role: viewer.role, adminGroupsConfigured: Boolean(env.ADMIN_GROUPS) } satisfies MeResponse);
+					return json({ email: viewer.email, role: viewer.role, adminGroupsConfigured: Boolean(env.ADMIN_GROUPS), openAccess: env.ADMIN_GROUPS?.trim() === "*" } satisfies MeResponse);
 				}
 
 				case "/api/session": {
