@@ -22,8 +22,9 @@ type GatewayAcct = {
  */
 async function fetchUserGateway(token: string, accountId: string, email: string, start: Date, end: Date, rollup: string): Promise<GatewayAcct> {
 	const build = (filterByEmail: boolean) => {
-		const f = filterByEmail ? ", email: $u" : "";
-		const d = filterByEmail ? "" : " email";
+		// Case-insensitive match (stored emails may differ in case); rows are re-checked exactly below.
+		const f = filterByEmail ? ", email_ilike: $u" : "";
+		const d = " email";
 		const limit = filterByEmail ? 2000 : FALLBACK_LIMIT;
 		return `query ($a: String!, $s: Time!, $e: Time!${filterByEmail ? ", $u: String!" : ""}) { viewer { accounts(filter: { accountTag: $a }) {
 			dns: cf1GatewayDns${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e${f} }, limit: ${limit}, orderBy: [sum_queries_DESC]) {
@@ -40,7 +41,10 @@ async function fetchUserGateway(token: string, accountId: string, email: string,
 	const vars = { a: accountId, s: start.toISOString(), e: end.toISOString() };
 	try {
 		const { data } = await graphql<{ viewer: { accounts: GatewayAcct[] } }>(token, build(true), { ...vars, u: email });
-		return data?.viewer.accounts[0] ?? { dns: [], http: [], net: [] };
+		const acct = data?.viewer.accounts[0] ?? { dns: [], http: [], net: [] };
+		// ILIKE treats "_" and "%" as wildcards, so keep only exact (case-insensitive) matches.
+		const exact = <T extends { dimensions: { email?: string } }>(rows: T[]) => rows.filter((r) => r.dimensions.email?.toLowerCase() === email);
+		return { dns: exact(acct.dns), http: exact(acct.http), net: exact(acct.net) };
 	} catch (err) {
 		if (!/insufficient permissions to filter on field/i.test(err instanceof Error ? err.message : "")) throw err;
 		const { data } = await graphql<{ viewer: { accounts: GatewayAcct[] } }>(token, build(false), vars);

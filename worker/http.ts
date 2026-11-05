@@ -91,8 +91,11 @@ export function parseParams<S extends ParamSpec>(url: URL, spec: S): { params: {
  * Edge cache for API results, consulted only AFTER the Access check (unlike Cache-Control-driven
  * caching, which can serve before the Worker runs). Keyed by path + canonical params.
  */
+const CACHE_VERSION = "v2";
+
 export async function cached(ctx: ExecutionContext, path: string, canonical: string, ttlSeconds: number, produce: () => Promise<{ body: unknown; cacheable: boolean }>): Promise<Response> {
-	const key = new Request(`https://api-cache.internal${path}?${canonical}`);
+	// Bump CACHE_VERSION to invalidate every cached API result at once (e.g. after a fix).
+	const key = new Request(`https://api-cache.internal/${CACHE_VERSION}${path}?${canonical}`);
 	const cache = caches.default;
 	const hit = await cache.match(key);
 	if (hit) return json(await hit.json(), { headers: { "X-Dashboard-Cache": "hit" } });
