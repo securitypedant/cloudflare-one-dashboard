@@ -226,6 +226,51 @@ button:disabled {
 	cursor: default;
 }
 
+/* Leader line from a slid country badge back to its anchor point (see TrafficMap place()). */
+.map-label {
+	position: relative;
+}
+
+.map-label .leader {
+	display: none;
+	position: absolute;
+	top: 50%;
+	height: 0;
+	border-top: 1px solid rgba(148, 163, 184, 0.7);
+	pointer-events: none;
+}
+
+.map-label .leader::after {
+	content: "";
+	position: absolute;
+	top: -3px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: rgba(226, 232, 240, 0.9);
+}
+
+.map-label.slid-left .leader,
+.map-label.slid-right .leader {
+	display: block;
+}
+
+.map-label.slid-left .leader {
+	left: 100%;
+}
+
+.map-label.slid-left .leader::after {
+	right: -3px;
+}
+
+.map-label.slid-right .leader {
+	right: 100%;
+}
+
+.map-label.slid-right .leader::after {
+	left: -3px;
+}
+
 .map-label .accent {
 	font-weight: 500;
 }
@@ -648,35 +693,36 @@ th .swatch {
 	}
 }
 
-/* ---------- Grouped navigation ---------- */
-.nav {
-	display: flex;
-	gap: 14px;
+/* ---------- Two-level navigation: report groups in the header, pages in the subnav ---------- */
+.group-tabs {
 	margin-left: auto;
-	flex-wrap: wrap;
-	align-items: flex-end;
 }
 
-.nav-group {
+.group-tabs button {
+	padding: 6px 14px;
+	font-weight: 600;
+}
+
+.subnav {
 	display: flex;
-	flex-direction: column;
-	gap: 2px;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 6px 20px;
+	border-bottom: 1px solid var(--border);
+	background: var(--panel);
 }
 
-.nav-group-label {
-	font-size: 10px;
-	text-transform: uppercase;
-	letter-spacing: 0.06em;
-	color: var(--muted);
-	padding-left: 6px;
+.subnav button {
+	border-color: transparent;
+	background: transparent;
+	font-size: 13px;
 }
 
-.nav-group.current .nav-group-label {
-	color: var(--accent);
-}
-
-.nav .tabs {
-	margin-left: 0;
+.subnav button.active {
+	border-color: transparent;
+	color: var(--text-h);
+	background: rgba(246, 130, 31, 0.15);
+	box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .header select:disabled {

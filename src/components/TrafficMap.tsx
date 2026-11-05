@@ -14,6 +14,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import type { FeatureCollection, LineString, Point, Position } from "geojson";
 import type { DatasetId, MapMode, Pop, TrafficPoint, Unit } from "../../shared/types.ts";
+import { distanceKm } from "../../shared/geo.ts";
 import { formatShare, formatValue } from "../lib/format.ts";
 import { renderPopup, type PopupContent } from "../lib/popup.ts";
 import { POP_COLOR } from "../lib/colors.ts";
@@ -90,7 +91,19 @@ export interface MapLabel {
 	accent?: string;
 	kind: "country" | "pop";
 	dimmed?: boolean;
+	/** Points ([lon, lat]) the label should keep clear of, e.g. the POPs a country badge points to. */
+	avoid?: [number, number][];
 }
+
+/**
+ * Badges slide sideways when an avoided point is both closer than LABEL_CLEAR_PX on screen and within
+ * LABEL_CLEAR_KM on the ground: small countries whose POP sits on the centroid (DUB, BRU) move, big
+ * countries whose POPs are far from the centroid (the US) never do, at any zoom.
+ */
+const LABEL_CLEAR_PX = 80;
+const LABEL_CLEAR_KM = 300;
+/** Gap (px) between the anchor point and the near edge of a slid badge, bridged by a leader line. */
+const LABEL_GAP_PX = 90;
 
 /** A marker on top of the map: hollow ring (e.g. CNI facility) or filled diamond (another vendor's POP). */
 export interface MapMarker {
@@ -452,7 +465,7 @@ export function TrafficMap({
 	});
 
 	// HTML labels (country badges, POP codes). Few enough to rebuild when they change.
-	const labelKey = labels.map((l) => `${l.key}|${l.text}|${l.accentText ?? ""}|${l.dimmed ? 1 : 0}`).join(";");
+	const labelKey = labels.map((l) => `${l.key}|${l.text}|${l.accentText ?? ""}|${l.dimmed ? 1 : 0}|${(l.avoid ?? []).join(",")}`).join(";");
 	const labelsRef = useRef(labels);
 	const onLabelClickRef = useRef(onLabelClick);
 	useEffect(() => {
@@ -465,6 +478,9 @@ export function TrafficMap({
 		const created = labelsRef.current.map((l) => {
 			const el = document.createElement("div");
 			el.className = `map-label ${l.kind}${l.dimmed ? " dimmed" : ""}`;
+			const leader = document.createElement("i");
+			leader.className = "leader";
+			el.appendChild(leader);
 			const main = document.createElement("span");
 			main.textContent = l.text;
 			el.appendChild(main);
@@ -479,11 +495,42 @@ export function TrafficMap({
 				e.stopPropagation();
 				onLabelClickRef.current?.(l.key);
 			});
-			return new Marker({ element: el, anchor: l.kind === "pop" ? "bottom" : "center", offset: l.kind === "pop" ? [0, -6] : [0, 0] })
+			const marker = new Marker({ element: el, anchor: l.kind === "pop" ? "bottom" : "center", offset: l.kind === "pop" ? [0, -6] : [0, 0] })
 				.setLngLat([l.lon, l.lat])
 				.addTo(map);
+			return { marker, label: l, el, leader };
 		});
-		return () => created.forEach((m) => m.remove());
+
+		// Slide country badges sideways when they'd sit on top of the POPs they point to, keeping a
+		// leader line back to the anchor. Labels far from their POPs (e.g. the US) don't move.
+		const place = () => {
+			for (const { marker, label, el, leader } of created) {
+				if (label.kind !== "country" || !label.avoid?.length) continue;
+				const anchor = map.project([label.lon, label.lat]);
+				const near = label.avoid
+					.filter(([lon, lat]) => distanceKm(label.lon, label.lat, lon, lat) <= LABEL_CLEAR_KM)
+					.map((p) => map.project(p))
+					.filter((p) => Math.hypot(p.x - anchor.x, p.y - anchor.y) < LABEL_CLEAR_PX)
+					.sort((a, b) => Math.hypot(a.x - anchor.x, a.y - anchor.y) - Math.hypot(b.x - anchor.x, b.y - anchor.y))[0];
+				el.classList.remove("slid-left", "slid-right");
+				if (!near) {
+					marker.setOffset([0, 0]);
+					continue;
+				}
+				// Move away from the nearest POP horizontally; ties go west.
+				const side = near.x >= anchor.x - 4 ? "left" : "right";
+				const shift = LABEL_GAP_PX + el.offsetWidth / 2;
+				marker.setOffset([side === "left" ? -shift : shift, 0]);
+				el.classList.add(side === "left" ? "slid-left" : "slid-right");
+				leader.style.width = `${LABEL_GAP_PX}px`;
+			}
+		};
+		place();
+		map.on("zoom", place);
+		return () => {
+			map.off("zoom", place);
+			created.forEach(({ marker }) => marker.remove());
+		};
 	}, [ready, labelKey]);
 
 	// Country choropleth: feature-state per ISO alpha-2 code.

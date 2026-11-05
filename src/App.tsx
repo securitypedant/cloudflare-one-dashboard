@@ -80,11 +80,16 @@ export default function App() {
 	// A viewer who lands on an admin tab (e.g. via a shared link) falls back to Traffic.
 	const active: TabId = current && (!current.admin || role === "admin") ? tab : "traffic";
 	const activeGroup = ALL_TABS.find((t) => t.id === active)!.group;
+	const activeGroupDef = GROUPS.find((g) => g.id === activeGroup)!;
+	// Remember the last page opened in each group, so switching groups returns to it.
+	const [lastInGroup, setLastInGroup] = useState<Record<string, TabId>>({});
 
 	const selectTab = (id: TabId) => {
 		setTab(id);
+		setLastInGroup((m) => ({ ...m, [ALL_TABS.find((t) => t.id === id)!.group]: id }));
 		history.replaceState(null, "", `#${id}`);
 	};
+	const selectGroup = (g: (typeof GROUPS)[number]) => selectTab(lastInGroup[g.id] ?? g.tabs[0].id);
 	const openUser = (email: string) => {
 		setUserEmail(email.toLowerCase());
 		selectTab("user");
@@ -104,18 +109,11 @@ export default function App() {
 						)}
 					</p>
 				</div>
-				<nav className="nav" aria-label="Reports">
+				<nav className="tabs group-tabs" role="tablist" aria-label="Report groups">
 					{groups.map((g) => (
-						<div key={g.id} className={`nav-group ${activeGroup === g.id ? "current" : ""}`}>
-							<span className="nav-group-label">{g.label}</span>
-							<div className="tabs" role="tablist" aria-label={g.label}>
-								{g.tabs.map((t) => (
-									<button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "active" : ""} onClick={() => selectTab(t.id)}>
-										{t.label}
-									</button>
-								))}
-							</div>
-						</div>
+						<button key={g.id} role="tab" aria-selected={activeGroup === g.id} className={activeGroup === g.id ? "active" : ""} onClick={() => selectGroup(g)}>
+							{g.label}
+						</button>
 					))}
 				</nav>
 				<select value={range} onChange={(e) => setRange(e.target.value as RangeId)} aria-label="Time range" disabled={NO_RANGE.includes(active)}>
@@ -126,6 +124,13 @@ export default function App() {
 					))}
 				</select>
 			</header>
+			<nav className="subnav" role="tablist" aria-label={`${activeGroupDef.label} reports`}>
+				{activeGroupDef.tabs.map((t) => (
+					<button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "active" : ""} onClick={() => selectTab(t.id)}>
+						{t.label}
+					</button>
+				))}
+			</nav>
 
 			{pops.error && <div className="banner error">Could not load Cloudflare POP locations: {pops.error}</div>}
 			{role === "admin" && me.data && !me.data.adminGroupsConfigured && me.data.email !== "local-dev" && (

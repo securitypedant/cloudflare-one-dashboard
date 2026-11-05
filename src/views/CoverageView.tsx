@@ -82,6 +82,7 @@ export function CoverageView({ range, pops, vendorIds, onVendorIds }: Props) {
 			accentText: `${formatShare(c.inCountryShare)} local`,
 			accent: bandColor(c.inCountryShare),
 			dimmed: !!selectedKey && selectedKey !== c.country,
+			avoid: shown.filter((f) => f.country === c.country).map((f) => [f.pop.lon, f.pop.lat] as [number, number]),
 		})),
 		...[...new Set(shown.map((f) => f.pop.iata))].map((iata) => {
 			const p = shown.find((f) => f.pop.iata === iata)!.pop;
