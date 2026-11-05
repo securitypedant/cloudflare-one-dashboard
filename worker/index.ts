@@ -67,6 +67,9 @@ function requireApiToken(env: Env): { token: string; accountId: string } {
 }
 
 class MisconfiguredError extends Error {}
+
+/** Don't cache a report with a failed section, so a fix (e.g. a new token permission) shows up immediately. */
+const allSectionsOk = (body: object) => !Object.values(body).some((v) => v && typeof v === "object" && "ok" in v && v.ok === false);
 class ForbiddenError extends Error {}
 
 const NO_PARAMS = {} as const;
@@ -187,33 +190,39 @@ export default {
 				case "/api/identity": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
-						body: await fetchIdentity(token, accountId, params.range, viewer.role),
-						cacheable: true,
-					}));
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+						const body = await fetchIdentity(token, accountId, params.range, viewer.role);
+						return { body, cacheable: allSectionsOk(body) };
+					});
 				}
 
 				case "/api/devices": {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return await cached(ctx, scoped(url.pathname), canonical, 300, async () => ({ body: await fetchDevices(token, accountId), cacheable: true }));
+					return await cached(ctx, scoped(url.pathname), canonical, 300, async () => {
+						const body = await fetchDevices(token, accountId);
+						return { body, cacheable: allSectionsOk(body) };
+					});
 				}
 
 				case "/api/tunnels": {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return await cached(ctx, scoped(url.pathname), canonical, 60, async () => ({ body: await fetchTunnels(token, accountId), cacheable: true }));
+					return await cached(ctx, scoped(url.pathname), canonical, 60, async () => {
+						const body = await fetchTunnels(token, accountId);
+						return { body, cacheable: allSectionsOk(body) };
+					});
 				}
 
 				case "/api/threats": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
-						body: await fetchThreats(token, accountId, params.range, viewer.role),
-						cacheable: true,
-					}));
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+						const body = await fetchThreats(token, accountId, params.range, viewer.role);
+						return { body, cacheable: allSectionsOk(body) };
+					});
 				}
 
 				case "/api/changes": {
@@ -243,10 +252,10 @@ export default {
 					if (email !== null) lowered.searchParams.set("email", email.toLowerCase());
 					const { params, canonical } = parseParams(lowered, { email: EMAIL_PARAM, range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
-						body: await fetchUserDetail(token, accountId, params.email, params.range),
-						cacheable: true,
-					}));
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+						const body = await fetchUserDetail(token, accountId, params.email, params.range);
+						return { body, cacheable: allSectionsOk(body) };
+					});
 				}
 
 				default:

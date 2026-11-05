@@ -77,7 +77,8 @@ export interface TunnelRow {
 	name: string;
 	kind: "cloudflared" | "magic-wan";
 	status: string;
-	connectors: { colo: string; iata: string; version: string; openedAt: string | null; originIp?: string }[];
+	/** Magic WAN: one entry per Cloudflare data center running health checks, with its own status. */
+	connectors: { colo: string; iata: string; version: string; openedAt: string | null; originIp?: string; status?: string; checks?: number; failureRate?: number }[];
 	outdated: boolean;
 	/** Magic WAN: share of failed health checks in the last 24h. */
 	failureRate?: number;

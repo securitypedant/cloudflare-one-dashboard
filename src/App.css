@@ -965,3 +965,57 @@ th .swatch {
 	font-size: 18px;
 	color: var(--text-h);
 }
+
+/* ---------- Map filter panel (Tunnels) ---------- */
+.map-filters {
+	position: absolute;
+	top: 10px;
+	left: 50px;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: min(420px, calc(100% - 70px));
+	padding: 8px 10px;
+	font-size: 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: rgba(11, 18, 32, 0.9);
+}
+
+.map-filters-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+.map-filters label {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+	cursor: pointer;
+}
+
+.map-filters select {
+	max-width: 100%;
+}
+
+.map-filters .chip {
+	padding: 1px 8px;
+	font-size: 11px;
+	text-transform: capitalize;
+	border: 1px solid;
+	border-radius: 999px;
+	color: var(--muted);
+	background: transparent;
+	opacity: 0.55;
+}
+
+.map-filters .chip.on {
+	opacity: 1;
+}
+
+.map-filters-hint {
+	font-size: 11px;
+}

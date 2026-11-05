@@ -41,15 +41,22 @@ interface HealthRow {
 	dimensions: { tunnelName: string; siteName: string; edgeColoName: string; resultStatus: string };
 }
 
-/** Magic WAN tunnel health checks over the last 24 hours, per tunnel. */
+/** Down at ≥ 50% failed health checks, degraded at ≥ 5%. */
+export const healthStatus = (failureRate: number) => (failureRate >= 0.5 ? "down" : failureRate >= 0.05 ? "degraded" : "healthy");
+
+/** Magic WAN tunnel health checks over the last 24 hours, per tunnel and per checking data center. */
 export function toMagicRows(rows: HealthRow[]): TunnelRow[] {
-	const by = new Map<string, { checks: number; failed: number; colos: Map<string, number> }>();
+	const by = new Map<string, { checks: number; failed: number; colos: Map<string, { checks: number; failed: number }> }>();
 	for (const r of rows) {
 		const name = r.dimensions.tunnelName || "(unnamed)";
-		const t = by.get(name) ?? { checks: 0, failed: 0, colos: new Map<string, number>() };
+		const t = by.get(name) ?? { checks: 0, failed: 0, colos: new Map<string, { checks: number; failed: number }>() };
+		const failed = r.dimensions.resultStatus !== "ok" && r.dimensions.resultStatus !== "healthy" ? r.count : 0;
 		t.checks += r.count;
-		if (r.dimensions.resultStatus !== "ok" && r.dimensions.resultStatus !== "healthy") t.failed += r.count;
-		t.colos.set(r.dimensions.edgeColoName, (t.colos.get(r.dimensions.edgeColoName) ?? 0) + r.count);
+		t.failed += failed;
+		const c = t.colos.get(r.dimensions.edgeColoName) ?? { checks: 0, failed: 0 };
+		c.checks += r.count;
+		c.failed += failed;
+		t.colos.set(r.dimensions.edgeColoName, c);
 		by.set(name, t);
 	}
 	return [...by]
@@ -59,8 +66,16 @@ export function toMagicRows(rows: HealthRow[]): TunnelRow[] {
 				id: name,
 				name,
 				kind: "magic-wan" as const,
-				status: failureRate >= 0.5 ? "down" : failureRate >= 0.05 ? "degraded" : "healthy",
-				connectors: [...t.colos.keys()].map((colo) => ({ colo, iata: coloToIata(colo), version: "", openedAt: null })),
+				status: healthStatus(failureRate),
+				connectors: [...t.colos].map(([colo, c]) => ({
+					colo,
+					iata: coloToIata(colo),
+					version: "",
+					openedAt: null,
+					checks: c.checks,
+					failureRate: c.checks ? c.failed / c.checks : 0,
+					status: healthStatus(c.checks ? c.failed / c.checks : 0),
+				})),
 				outdated: false,
 				failureRate,
 				checks: t.checks,
@@ -72,7 +87,7 @@ export function toMagicRows(rows: HealthRow[]): TunnelRow[] {
 export async function fetchTunnels(token: string, accountId: string): Promise<TunnelsResponse> {
 	const now = Date.now();
 	const [cfd, magic] = await Promise.all([
-		section(() => cfList<CfdTunnel>(token, `/accounts/${accountId}/cfd_tunnel`, "Cloudflare Tunnel Read", { is_deleted: "false" }, 1000)),
+		section(() => cfList<CfdTunnel>(token, `/accounts/${accountId}/cfd_tunnel`, "Cloudflare Tunnel Read", { is_deleted: "false" })),
 		section(async () => {
 			const query = `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) {
 				checks: magicTransitTunnelHealthChecksAdaptiveGroups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 5000) { count dimensions { tunnelName siteName edgeColoName resultStatus } }

@@ -57,7 +57,7 @@ export interface AccessUser {
 
 export const USERS_PERMISSION = "Access: Users Read (or Zero Trust Read)";
 
-export const listAccessUsers = (token: string, accountId: string) => cfList<AccessUser>(token, `/accounts/${accountId}/access/users`, USERS_PERMISSION, {}, 1000);
+export const listAccessUsers = (token: string, accountId: string) => cfList<AccessUser>(token, `/accounts/${accountId}/access/users`, USERS_PERMISSION);
 
 export interface CfDevice {
 	id: string;
@@ -73,4 +73,4 @@ export interface CfDevice {
 
 export const DEVICES_PERMISSION = "Zero Trust Read";
 
-export const listDevices = (token: string, accountId: string) => cfList<CfDevice>(token, `/accounts/${accountId}/devices`, DEVICES_PERMISSION, {}, 1000);
+export const listDevices = (token: string, accountId: string) => cfList<CfDevice>(token, `/accounts/${accountId}/devices`, DEVICES_PERMISSION);

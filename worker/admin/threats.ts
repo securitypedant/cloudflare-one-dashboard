@@ -28,7 +28,7 @@ async function securityCategoryIds(token: string, accountId: string): Promise<Ma
 
 /** Map Gateway app IDs to names via the app types API (falls back to "App <id>"). */
 async function appNames(token: string, accountId: string): Promise<Map<number, string>> {
-	const res = await cfList<{ id: number; name?: string; application_type_id?: number }>(token, `/accounts/${accountId}/gateway/app_types`, "Zero Trust Read", {}, 1000);
+	const res = await cfList<{ id: number; name?: string; application_type_id?: number }>(token, `/accounts/${accountId}/gateway/app_types`, "Zero Trust Read");
 	return new Map(res.filter((a) => a.application_type_id !== undefined).map((a) => [a.id, a.name ?? `App ${a.id}`]));
 }
 

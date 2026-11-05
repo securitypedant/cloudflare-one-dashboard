@@ -4,7 +4,8 @@ import { readJson } from "./upstream.ts";
 
 const API = "https://api.cloudflare.com/client/v4";
 const MAX_BYTES = 10 * 1024 * 1024;
-const MAX_PAGES = 20;
+/** Many list endpoints cap per_page at 100 (e.g. devices: 5-100), so page with 100 and allow up to 5,000 items. */
+const MAX_PAGES = 50;
 
 /** The token lacks a permission; `permission` is the token permission to add. */
 export class PermissionError extends Error {
@@ -45,7 +46,9 @@ export async function cfList<T>(token: string, path: string, permission: string,
 		const body = await cfGet<T[]>(token, path, permission, { ...params, page, per_page: perPage });
 		const items = Array.isArray(body.result) ? body.result : [];
 		out.push(...items);
-		const totalPages = body.result_info?.total_pages;
+		// No pagination info means the endpoint returned everything in one response.
+		if (!body.result_info) break;
+		const totalPages = body.result_info.total_pages;
 		if (items.length < perPage || (totalPages !== undefined && page >= totalPages)) break;
 	}
 	return out;
