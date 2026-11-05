@@ -5,6 +5,10 @@ import { SectionView } from "../components/SectionView.tsx";
 import { Section, Stat, Status } from "../components/ui.tsx";
 import { useApi } from "../lib/api.ts";
 import { formatShare } from "../lib/format.ts";
+import { useState } from "react";
+import { TimeChart } from "../components/TimeChart.tsx";
+import { buildSeries } from "../lib/series.ts";
+import { COUNTRIES } from "../../shared/countries.ts";
 
 const OK = "#4ade80";
 const FAIL = "#f87171";
@@ -33,7 +37,6 @@ export function IdentityView({ range, role, onOpenUser }: { range: RangeId; role
 	const res = useApi<IdentityResponse>(`/api/identity?range=${range}`);
 	const d = res.data;
 	const total = d ? d.totals.success + d.totals.failure : 0;
-	const maxDay = Math.max(1, ...(d?.daily ?? []).map((x) => x.success + x.failure));
 
 	return (
 		<main className="page">
@@ -51,16 +54,7 @@ export function IdentityView({ range, role, onOpenUser }: { range: RangeId; role
 						)}
 					</section>
 
-					<Section title="Logins per day" hint="Green: succeeded. Red: failed (denied by policy, failed IdP login, or blocked).">
-						<div className="day-chart">
-							{d.daily.map((x) => (
-								<div key={x.date} className="day-bar" title={`${x.date}: ${x.success} succeeded, ${x.failure} failed`}>
-									<span style={{ height: `${(x.failure / maxDay) * 100}%`, background: FAIL }} />
-									<span style={{ height: `${(x.success / maxDay) * 100}%`, background: OK }} />
-								</div>
-							))}
-						</div>
-					</Section>
+					<LoginCharts d={d} />
 
 					<div className="grid-3">
 						<Section title="By country">
@@ -123,3 +117,34 @@ export function IdentityView({ range, role, onOpenUser }: { range: RangeId; role
 	);
 }
 
+
+const BREAKDOWNS = {
+	country: { label: "Country", key: (r: IdentityResponse["timeline"][number]) => r.country, name: (k: string) => COUNTRIES[k]?.name ?? k },
+	idp: { label: "Identity provider", key: (r: IdentityResponse["timeline"][number]) => r.idp, name: (k: string) => k },
+	app: { label: "Application", key: (r: IdentityResponse["timeline"][number]) => r.app, name: (k: string) => k },
+} as const;
+
+/** Logins over time, split by country, identity provider or app; succeeded vs failed. */
+function LoginCharts({ d }: { d: IdentityResponse }) {
+	const [by, setBy] = useState<keyof typeof BREAKDOWNS>("country");
+	const b = BREAKDOWNS[by];
+	const fmt = (v: number) => Math.round(v).toLocaleString();
+	return (
+		<>
+			<div className="chart-toolbar">
+				<span className="muted">Break down by</span>
+				<div className="segmented">
+					{(Object.keys(BREAKDOWNS) as (keyof typeof BREAKDOWNS)[]).map((k) => (
+						<button key={k} className={by === k ? "active" : ""} aria-pressed={by === k} onClick={() => setBy(k)}>
+							{BREAKDOWNS[k].label}
+						</button>
+					))}
+				</div>
+			</div>
+			<div className="chart-grid-2">
+				<TimeChart title={`Successful logins by ${b.label.toLowerCase()}`} data={buildSeries(d.timeline, { t: (r) => r.t, key: b.key, value: (r) => r.success, label: b.name, total: "All logins" })} bucket={d.bucket} format={fmt} />
+				<TimeChart title={`Failed logins by ${b.label.toLowerCase()}`} data={buildSeries(d.timeline, { t: (r) => r.t, key: b.key, value: (r) => r.failure, label: b.name, total: "All failures" })} bucket={d.bucket} format={fmt} hint="Denied by policy, failed identity-provider login, or blocked." />
+			</div>
+		</>
+	);
+}

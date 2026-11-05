@@ -81,6 +81,9 @@ export interface IdentityResponse {
 	byIdp: CountRow[];
 	byApp: (CountRow & { domain?: string })[];
 	daily: { date: string; success: number; failure: number }[];
+	/** Logins per time bucket by country, identity provider and app (for charts). */
+	timeline: { t: string; country: string; idp: string; app: string; success: number; failure: number }[];
+	bucket: "hour" | "day";
 	/** Admin only. */
 	users?: Section<{ email: string; name: string; success: number; failure: number; lastLogin: string | null; seats: string[]; devices: number; inactiveDays: number | null }[]>;
 	unusedApps?: Section<{ id: string; name: string; domain: string }[]>;
@@ -121,6 +124,8 @@ export interface TunnelRow {
 export interface TunnelsResponse {
 	cloudflared: Section<TunnelRow[]>;
 	magicWan: Section<TunnelRow[]>;
+	/** Magic WAN health checks per tunnel per hour over the last 24 hours (for charts). */
+	magicWanHourly: Section<{ t: string; tunnel: string; checks: number; failed: number }[]>;
 	latestConnectorVersion: string | null;
 }
 
@@ -132,6 +137,12 @@ export interface ThreatsResponse {
 	malware: Section<{ host: string; avBlocked: number; sandboxBlocked: number; user?: string }[]>;
 	/** Admin only: users with the most security-category blocks. */
 	targetedUsers?: Section<{ email: string; queries: number }[]>;
+}
+
+export interface ThreatSeriesResponse {
+	range: RangeId;
+	bucket: "hour" | "day";
+	points: Section<{ t: string; securityBlocks: number; blockedDns: number; dlpMatches: number; avBlocked: number; sandboxBlocked: number }[]>;
 }
 
 export interface AuditEntry {

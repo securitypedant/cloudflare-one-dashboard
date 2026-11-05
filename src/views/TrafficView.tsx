@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { TrafficCharts } from "./charts.tsx";
 import {
 	DATASET_IDS,
 	DATASETS,
@@ -65,9 +66,10 @@ interface Props {
 	pops: Pop[];
 	vendorIds: string[];
 	onVendorIds: (ids: string[]) => void;
+	view?: "map" | "chart";
 }
 
-export function TrafficView({ range, pops, vendorIds, onVendorIds }: Props) {
+export function TrafficView({ range, pops, vendorIds, onVendorIds, view = "map" }: Props) {
 	const vendors = useApi<Vendor[]>("/api/vendors");
 	const [mode, setMode] = useState<MapMode>("pop");
 	const [selected, setSelected] = useState<DatasetId[]>(["dns"]);
@@ -196,29 +198,33 @@ export function TrafficView({ range, pops, vendorIds, onVendorIds }: Props) {
 			</nav>
 
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={mapLayers}
-					mode={mode}
-					selectedKey={selectedKey}
-					onSelect={setSelectedKey}
-					markers={vendorMarkers(vendors.data, vendorIds)}
-				>
-					{timelineOn && (
-						<Timeline
-							times={frameTimes}
-							index={frameIndex}
-							bucket={range === "30d" || range === "90d" ? "day" : "hour"}
-							playing={playing}
-							loading={timelines.length < selected.length}
-							onIndex={(i) => {
-								setFrame(i);
-								setPlaying(false);
-							}}
-							onPlayingChange={setPlaying}
-						/>
-					)}
-				</TrafficMap>
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={mapLayers}
+						mode={mode}
+						selectedKey={selectedKey}
+						onSelect={setSelectedKey}
+						markers={vendorMarkers(vendors.data, vendorIds)}
+					>
+						{timelineOn && (
+							<Timeline
+								times={frameTimes}
+								index={frameIndex}
+								bucket={range === "30d" || range === "90d" ? "day" : "hour"}
+								playing={playing}
+								loading={timelines.length < selected.length}
+								onIndex={(i) => {
+									setFrame(i);
+									setPlaying(false);
+								}}
+								onPlayingChange={setPlaying}
+							/>
+						)}
+					</TrafficMap>
+				) : (
+					<TrafficCharts datasets={selected} range={range} mode={mode} selectedKey={selectedKey} pops={pops} />
+				)}
 				<Sidebar entries={entries} mode={mode} pops={pops} range={range} selectedKey={selectedKey} onSelect={setSelectedKey} />
 			</main>
 		</>

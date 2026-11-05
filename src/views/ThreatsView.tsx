@@ -1,4 +1,6 @@
-import type { Role, ThreatsResponse } from "../../shared/admin.ts";
+import type { Role, ThreatSeriesResponse, ThreatsResponse } from "../../shared/admin.ts";
+import { TimeChart } from "../components/TimeChart.tsx";
+import { buildSeries } from "../lib/series.ts";
 import type { RangeId } from "../../shared/types.ts";
 import { DataTable } from "../components/DataTable.tsx";
 import { SectionView } from "../components/SectionView.tsx";
@@ -11,6 +13,7 @@ const STATUS_LABEL: Record<string, string> = { approved: "Approved", unapproved:
 
 export function ThreatsView({ range, role, onOpenUser }: { range: RangeId; role: Role; onOpenUser: (email: string) => void }) {
 	const res = useApi<ThreatsResponse>(`/api/threats?range=${range}`);
+	const series = useApi<ThreatSeriesResponse>(`/api/threats/series?range=${range}`);
 	const d = res.data;
 	const isAdmin = role === "admin";
 	const userCell = (u?: string) => (u ? <button className="link-button" onClick={() => onOpenUser(u)}>{u}</button> : <span className="muted">—</span>);
@@ -20,6 +23,29 @@ export function ThreatsView({ range, role, onOpenUser }: { range: RangeId; role:
 			<Status loading={res.loading} error={res.error} />
 			{d && (
 				<>
+					<SectionView result={series.data?.points}>
+						{(points) => {
+							const rows = points.flatMap((p) => [
+								{ t: p.t, k: "Security-risk DNS blocks", v: p.securityBlocks },
+								{ t: p.t, k: "All blocked DNS", v: p.blockedDns },
+								{ t: p.t, k: "DLP matches", v: p.dlpMatches },
+								{ t: p.t, k: "Antivirus blocks", v: p.avBlocked },
+								{ t: p.t, k: "Sandbox blocks", v: p.sandboxBlocked },
+							]);
+							const one = (k: string) => buildSeries(rows.filter((r) => r.k === k), { t: (r) => r.t, key: (r) => r.k, value: (r) => r.v });
+							const fmt = (v: number) => Math.round(v).toLocaleString();
+							const bucket = series.data!.bucket;
+							return (
+								<div className="chart-grid-2">
+									<TimeChart title="Security-risk DNS blocks" data={one("Security-risk DNS blocks")} bucket={bucket} format={fmt} height={170} hint="Malware, phishing, command and control and other security categories." />
+									<TimeChart title="All blocked DNS" data={one("All blocked DNS")} bucket={bucket} format={fmt} height={170} />
+									<TimeChart title="DLP matches" data={one("DLP matches")} bucket={bucket} format={fmt} height={170} />
+									<TimeChart title="Malware blocked" data={buildSeries(rows.filter((r) => r.k === "Antivirus blocks" || r.k === "Sandbox blocks"), { t: (r) => r.t, key: (r) => r.k, value: (r) => r.v })} bucket={bucket} format={fmt} height={170} />
+								</div>
+							);
+						}}
+					</SectionView>
+
 					<div className="grid-2">
 						<Section title="Security threats blocked" hint="Blocked DNS queries in security-risk categories (malware, phishing, command and control, …).">
 							<SectionView result={d.securityCategories}>

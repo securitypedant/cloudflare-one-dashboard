@@ -13,7 +13,7 @@ import { fetchPosture } from "./admin/posture.ts";
 import { fetchIdentity } from "./admin/identity.ts";
 import { fetchDevices } from "./admin/devices.ts";
 import { fetchTunnels } from "./admin/tunnels.ts";
-import { fetchThreats } from "./admin/threats.ts";
+import { fetchThreats, fetchThreatSeries } from "./admin/threats.ts";
 import { fetchChanges } from "./admin/changes.ts";
 import { fetchUserDetail, fetchUserList } from "./admin/users.ts";
 import type { MeResponse } from "../shared/admin.ts";
@@ -214,11 +214,21 @@ export default {
 				}
 
 				case "/api/tunnels": {
-					requireAdmin();
+					// Shared (Network group); fetchTunnels omits origin IPs for viewers, cached per role.
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
 					return await cached(ctx, scoped(url.pathname), canonical, 60, async () => {
-						const body = await fetchTunnels(token, accountId);
+						const body = await fetchTunnels(token, accountId, viewer.role);
+						return { body, cacheable: allSectionsOk(body) };
+					});
+				}
+
+				case "/api/threats/series": {
+					// Totals only (no user-level fields), so viewers and admins share the cache entry.
+					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
+					const { token, accountId } = requireApiToken(env);
+					return await cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+						const body = await fetchThreatSeries(token, accountId, params.range);
 						return { body, cacheable: allSectionsOk(body) };
 					});
 				}

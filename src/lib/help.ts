@@ -6,6 +6,7 @@ export interface HelpTopic {
 }
 
 const RANGE = "Uses the time range picker in the header.";
+const CHART = "Switch to Chart (top left of this row) to see the same data over time: hourly for 24h and 7d, daily for 30d and 90d. Charts show the top locations plus the total, with the change from first to last point; click a location on the map or in the table first to chart it alone. Click legend entries to hide lines.";
 
 export const HELP: Record<string, HelpTopic> = {
 	traffic: {
@@ -15,6 +16,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Orange dots are every Cloudflare POP. Circles are sized by traffic; each dataset (DNS, HTTP, network, bandwidth, Access logins, users, devices) has its own colour and they nest at the same POP.",
 					"Switch between \"By POP\" (where traffic was handled) and \"By user location\" (countries shaded by where users are).",
 					"Hover a circle or country for its numbers. The sidebar ranks locations and shows the change against the previous period of the same length, plus the biggest movers.",
@@ -38,6 +40,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Each badge is \"Users in <country>\" with the share of their traffic served by a POP in the same country (green ≥ 90%, amber 50–90%, red below 50%).",
 					"Arrows run from the badge to each POP that served that country: green for a POP in the same country, amber for a different country; width shows volume. Flows under 1% of a country's traffic are hidden.",
 					"Click a badge or table row to focus one country. Small countries' badges slide aside with a leader line so they don't cover the POP.",
@@ -61,6 +64,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Pink circles are user cities, sized by share of WARP device time (how much devices there were online), not head count.",
 					"Lines run from each city to the POP it used: green when that POP is within 300 km of the city's nearest POP, amber when it's further.",
 					"Hover a city for its share, the POPs used with distance and WARP handshake time, the nearest POP if different, and the ISPs.",
@@ -84,6 +88,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Blue circles are entry POPs; lines show traffic exiting at a different POP.",
 					"The on-ramp and off-ramp breakdowns show WARP, Magic WAN, proxy endpoints and so on.",
 					"Rings mark Direct CNI facilities (v1/v2 dataplanes).",
@@ -106,6 +111,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Circles are coloured by average TCP handshake time from the client to Cloudflare: green under 20 ms, through to red at 100 ms or more.",
 					"The DEX section shows HTTP test duration and failure rate, and WARP tunnel handshake latency, per location.",
 				],
@@ -126,6 +132,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Pick a metric to map it. Rates show the share of that location's traffic that was blocked.",
 					"Top blocked DNS categories and top DNS categories update for the selected country.",
 				],
@@ -145,6 +152,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					"The charts at the top show security-risk DNS blocks, all blocked DNS, DLP matches and malware blocks over time.",
 					"Security threats: blocked DNS queries in security-risk categories such as malware, phishing and command and control.",
 					"Shadow IT: SaaS apps your users reach, with their review status from Cloudflare One's application review. Unapproved or unreviewed apps with uploads deserve a look.",
 					"DLP: requests that matched a DLP profile, by destination. Malware: files blocked by antivirus scanning or the sandbox.",
@@ -167,7 +175,8 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
-					"Logins per day split into succeeded (green) and failed (red), then by country, identity provider and application.",
+					"Charts show successful and failed logins over time (hourly for 24h and 7d, daily for 30d and 90d), broken down by country, identity provider or application.",
+					"Below, totals by country, identity provider and application.",
 					"Admins also get a user table (logins, failures, devices, last login), seat counts with seats inactive for 30+ days that could be reclaimed, and applications with no logins.",
 				],
 			},
@@ -230,6 +239,7 @@ export const HELP: Record<string, HelpTopic> = {
 			{
 				heading: "How to read it",
 				points: [
+					CHART,
 					"Circles are POPs where tunnels connect, coloured by the worst status there and sized by the number of tunnels.",
 					"Use the filter panel to show Cloudflare Tunnels and/or Magic WAN, pick statuses, or focus on one tunnel.",
 					"Magic WAN health checks run from every Cloudflare data center; each circle is coloured by the share of that data center's checks that failed (down ≥ 50%, degraded ≥ 5%).",
@@ -238,7 +248,10 @@ export const HELP: Record<string, HelpTopic> = {
 			},
 			{
 				heading: "Data and limits",
-				points: ["Cloudflare Tunnel API; Magic WAN health checks from the last 24 hours. Not affected by the time range."],
+				points: [
+					"Cloudflare Tunnel API; Magic WAN health checks from the last 24 hours. Not affected by the time range.",
+					"Visible to every viewer; connector origin IPs are shown to admins only. Cloudflare Tunnel status has no history, so the chart covers Magic WAN only.",
+				],
 			},
 		],
 	},

@@ -33,6 +33,7 @@ const GROUPS = [
 			{ id: "users", label: "User locations" },
 			{ id: "entry-exit", label: "Entry & exit" },
 			{ id: "performance", label: "Performance" },
+			{ id: "tunnels", label: "Tunnels" },
 		],
 	},
 	{
@@ -52,7 +53,6 @@ const GROUPS = [
 		tabs: [
 			{ id: "posture", label: "Posture" },
 			{ id: "devices", label: "Devices" },
-			{ id: "tunnels", label: "Tunnels" },
 			{ id: "changes", label: "Changes" },
 			{ id: "user", label: "User lookup" },
 		],
@@ -60,6 +60,8 @@ const GROUPS = [
 ] as const;
 type TabId = (typeof GROUPS)[number]["tabs"][number]["id"];
 const ALL_TABS = GROUPS.flatMap((g) => g.tabs.map((t) => ({ ...t, group: g.id, admin: g.admin })));
+/** Map pages offer a Map | Chart toggle. */
+const MAP_PAGES: TabId[] = ["traffic", "coverage", "users", "entry-exit", "performance", "security", "tunnels"];
 /** Tabs whose content doesn't depend on the time range. */
 const NO_RANGE: TabId[] = ["posture", "devices", "tunnels"];
 
@@ -88,6 +90,8 @@ export default function App() {
 	const [lastInGroup, setLastInGroup] = useState<Record<string, TabId>>({});
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [sessionOpen, setSessionOpen] = useState(false);
+	// Map or chart, shared by every map page so the choice sticks while you move between them.
+	const [view, setView] = useState<"map" | "chart">("map");
 
 	const selectTab = (id: TabId) => {
 		setTab(id);
@@ -133,6 +137,16 @@ export default function App() {
 				</select>
 			</header>
 			<nav className="subnav" role="tablist" aria-label={`${activeGroupDef.label} reports`}>
+				{MAP_PAGES.includes(active) && (
+					<div className="segmented view-toggle" role="group" aria-label="View">
+						<button className={view === "map" ? "active" : ""} aria-pressed={view === "map"} onClick={() => setView("map")}>
+							Map
+						</button>
+						<button className={view === "chart" ? "active" : ""} aria-pressed={view === "chart"} onClick={() => setView("chart")}>
+							Chart
+						</button>
+					</div>
+				)}
 				{activeGroupDef.tabs.map((t) => (
 					<button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? "active" : ""} onClick={() => selectTab(t.id)}>
 						{t.label}
@@ -150,17 +164,17 @@ export default function App() {
 				<div className="banner">Admin views are hidden for everyone until ADMIN_GROUPS is set in the Worker config.</div>
 			)}
 
-			{active === "traffic" && <TrafficView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} />}
-			{active === "coverage" && <CoverageView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} />}
-			{active === "users" && <UserLocationsView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} />}
-			{active === "entry-exit" && <EntryExitView range={range} pops={popList} />}
-			{active === "performance" && <PerformanceView range={range} pops={popList} />}
-			{active === "security" && <SecurityView range={range} pops={popList} />}
+			{active === "traffic" && <TrafficView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} view={view} />}
+			{active === "coverage" && <CoverageView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} view={view} />}
+			{active === "users" && <UserLocationsView range={range} pops={popList} vendorIds={vendorIds} onVendorIds={setVendorIds} view={view} />}
+			{active === "entry-exit" && <EntryExitView range={range} pops={popList} view={view} />}
+			{active === "performance" && <PerformanceView range={range} pops={popList} view={view} />}
+			{active === "security" && <SecurityView range={range} pops={popList} view={view} />}
 			{active === "threats" && <ThreatsView range={range} role={role} onOpenUser={openUser} />}
 			{active === "identity" && <IdentityView range={range} role={role} onOpenUser={openUser} />}
 			{active === "posture" && <PostureView />}
 			{active === "devices" && <DevicesView onOpenUser={openUser} />}
-			{active === "tunnels" && <TunnelsView pops={popList} />}
+			{active === "tunnels" && <TunnelsView pops={popList} view={view} />}
 			{active === "changes" && <ChangesView range={range} />}
 			{active === "user" && <UserView range={range} email={userEmail} onEmail={setUserEmail} />}
 		</div>

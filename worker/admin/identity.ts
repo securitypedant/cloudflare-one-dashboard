@@ -5,6 +5,18 @@ import { section } from "../cfapi.ts";
 import { DAY_MS, listAccessUsers, queryInWindows, rangeDates } from "./common.ts";
 import { cfList } from "../cfapi.ts";
 import type { AccessApp } from "./posture.ts";
+import { RANGE_ROLLUP } from "../traffic.ts";
+
+interface HourRow {
+	count: number;
+	dimensions: { datetimeHour: string; country: string; identityProvider: string; isSuccessfulLogin: number; appId: string };
+}
+
+const HOURLY_QUERY = `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+	logins: accessLoginRequestsAdaptiveGroups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 10000, orderBy: [count_DESC]) {
+		count dimensions { datetimeHour country identityProvider isSuccessfulLogin appId }
+	}
+} } }`;
 
 interface LoginRow {
 	count: number;
@@ -35,6 +47,31 @@ export function countBy(rows: LoginRow[], key: (r: LoginRow) => string, label: (
 	return [...m.values()].sort((a, b) => b.success + b.failure - (a.success + a.failure));
 }
 
+/** Logins per hour (24h/7d, one extra query without per-user detail) or per day (from the daily rows). */
+async function loginTimeline(token: string, accountId: string, rangeId: RangeId, start: Date, end: Date, dailyRows: LoginRow[], appName: (id: string) => string) {
+	const bucket = RANGE_ROLLUP[rangeId] === "1d" ? ("day" as const) : ("hour" as const);
+	const source: { t: string; country: string; idp: string; app: string; ok: boolean; count: number }[] =
+		bucket === "day"
+			? dailyRows.map((r) => ({ t: `${r.dimensions.date}T00:00:00Z`, country: r.dimensions.country, idp: r.dimensions.identityProvider, app: r.dimensions.appId, ok: Boolean(r.dimensions.isSuccessfulLogin), count: r.count }))
+			: (await queryInWindows<HourRow>(token, HOURLY_QUERY, { a: accountId }, start, end, 7 * DAY_MS, (acct) => (acct.logins as HourRow[]) ?? [])).map((r) => ({
+					t: r.dimensions.datetimeHour,
+					country: r.dimensions.country,
+					idp: r.dimensions.identityProvider,
+					app: r.dimensions.appId,
+					ok: Boolean(r.dimensions.isSuccessfulLogin),
+					count: r.count,
+				}));
+	const m = new Map<string, { t: string; country: string; idp: string; app: string; success: number; failure: number }>();
+	for (const r of source) {
+		const k = `${r.t}|${r.country}|${r.idp}|${r.app}`;
+		const row = m.get(k) ?? { t: r.t, country: r.country || "unknown", idp: r.idp || "unknown", app: appName(r.app) || "unknown", success: 0, failure: 0 };
+		if (r.ok) row.success += r.count;
+		else row.failure += r.count;
+		m.set(k, row);
+	}
+	return { timeline: [...m.values()].sort((a, b) => a.t.localeCompare(b.t)), bucket };
+}
+
 export async function fetchIdentity(token: string, accountId: string, rangeId: RangeId, role: Role): Promise<IdentityResponse> {
 	const { start, end } = rangeDates(rangeId);
 	const [rows, apps] = await Promise.all([
@@ -59,6 +96,7 @@ export async function fetchIdentity(token: string, accountId: string, rangeId: R
 		byIdp: countBy(rows, (r) => r.dimensions.identityProvider, (k) => k),
 		byApp,
 		daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
+		...(await loginTimeline(token, accountId, rangeId, start, end, rows, (id) => appById.get(id)?.name ?? id)),
 	};
 	if (role !== "admin") return result;
 

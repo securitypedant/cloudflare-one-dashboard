@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { UserLocationCharts } from "./charts.tsx";
 import type { Pop, RangeId, UserLocationsResponse, Vendor } from "../../shared/types.ts";
 import { TrafficMap, type MapLayer, type MapLine } from "../components/TrafficMap.tsx";
 import { VendorPicker } from "../components/VendorPicker.tsx";
@@ -20,11 +21,12 @@ interface Props {
 	pops: Pop[];
 	vendorIds: string[];
 	onVendorIds: (ids: string[]) => void;
+	view?: "map" | "chart";
 }
 
 const formatMs = (ms: number | null) => (ms === null ? "–" : `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`);
 
-export function UserLocationsView({ range, pops, vendorIds, onVendorIds }: Props) {
+export function UserLocationsView({ range, pops, vendorIds, onVendorIds, view = "map" }: Props) {
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const data = useApi<UserLocationsResponse>(`/api/user-locations?range=${range}`);
 	const vendors = useApi<Vendor[]>("/api/vendors");
@@ -92,29 +94,33 @@ export function UserLocationsView({ range, pops, vendorIds, onVendorIds }: Props
 				{data.loading && <span className="muted loading">Loading…</span>}
 			</nav>
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={[cityLayer]}
-					mode="pop"
-					selectedKey={selectedKey}
-					onSelect={setSelectedKey}
-					lines={lines}
-					markers={vendorMarkers(vendors.data, vendorIds)}
-					popupFor={popupFor}
-					legend={
-						<>
-							<span>
-								<i className="ring" style={{ borderColor: CITY_COLOR }} /> User city (size: device time)
-							</span>
-							<span>
-								<i className="line-swatch" style={{ background: NEAR_LINE }} /> Connected to a nearby POP
-							</span>
-							<span>
-								<i className="line-swatch" style={{ background: FAR_LINE }} /> &gt;{FAR_EXTRA_KM} km beyond the nearest POP
-							</span>
-						</>
-					}
-				/>
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={[cityLayer]}
+						mode="pop"
+						selectedKey={selectedKey}
+						onSelect={setSelectedKey}
+						lines={lines}
+						markers={vendorMarkers(vendors.data, vendorIds)}
+						popupFor={popupFor}
+						legend={
+							<>
+								<span>
+									<i className="ring" style={{ borderColor: CITY_COLOR }} /> User city (size: device time)
+								</span>
+								<span>
+									<i className="line-swatch" style={{ background: NEAR_LINE }} /> Connected to a nearby POP
+								</span>
+								<span>
+									<i className="line-swatch" style={{ background: FAR_LINE }} /> &gt;{FAR_EXTRA_KM} km beyond the nearest POP
+								</span>
+							</>
+						}
+					/>
+				) : (
+					<UserLocationCharts range={range} selectedKey={selectedKey} />
+				)}
 				<aside className="sidebar">
 					<Status loading={data.loading} error={data.error} />
 					{data.data && !data.data.available && (

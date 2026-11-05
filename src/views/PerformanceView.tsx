@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PerformanceCharts } from "./charts.tsx";
 import { COUNTRIES } from "../../shared/countries.ts";
 import type { DexResponse, MapMode, Pop, RangeId, ReportResponse, TrafficPoint } from "../../shared/types.ts";
 import { TrafficMap, type MapLayer } from "../components/TrafficMap.tsx";
@@ -26,7 +27,7 @@ interface Row {
 
 const MODE_LABELS: Record<MapMode, string> = { pop: "By Cloudflare POP", country: "By user location" };
 
-export function PerformanceView({ range, pops }: { range: RangeId; pops: Pop[] }) {
+export function PerformanceView({ range, pops, view = "map" }: { range: RangeId; pops: Pop[]; view?: "map" | "chart" }) {
 	const [mode, setMode] = useState<MapMode>("pop");
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const report = useApi<ReportResponse>(`/api/report?id=${mode === "pop" ? "perf_pop" : "perf_country"}&range=${range}`);
@@ -98,24 +99,28 @@ export function PerformanceView({ range, pops }: { range: RangeId; pops: Pop[] }
 				{(report.loading || dex.loading) && <span className="muted loading">Loading…</span>}
 			</nav>
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={[layer]}
-					mode={mode}
-					selectedKey={selectedKey}
-					onSelect={setSelectedKey}
-					popupFor={popupFor}
-					legend={
-						<>
-							{BANDS.map((b) => (
-								<span key={b.label}>
-									<i className="ring" style={{ borderColor: b.color, background: `${b.color}33` }} /> TCP handshake {b.label}
-								</span>
-							))}
-							<span className="muted">{mode === "pop" ? "Circle size: sessions" : "Shade strength: sessions"}</span>
-						</>
-					}
-				/>
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={[layer]}
+						mode={mode}
+						selectedKey={selectedKey}
+						onSelect={setSelectedKey}
+						popupFor={popupFor}
+						legend={
+							<>
+								{BANDS.map((b) => (
+									<span key={b.label}>
+										<i className="ring" style={{ borderColor: b.color, background: `${b.color}33` }} /> TCP handshake {b.label}
+									</span>
+								))}
+								<span className="muted">{mode === "pop" ? "Circle size: sessions" : "Shade strength: sessions"}</span>
+							</>
+						}
+					/>
+				) : (
+					<PerformanceCharts range={range} mode={mode} pops={pops} selectedKey={selectedKey} />
+				)}
 				<aside className="sidebar">
 					<Status loading={report.loading} error={report.data?.error ?? report.error} />
 					{report.data && !report.data.error && (

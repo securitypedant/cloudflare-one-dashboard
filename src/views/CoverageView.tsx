@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CoverageCharts } from "./charts.tsx";
 import { COUNTRIES } from "../../shared/countries.ts";
 import type { Pop, RangeId, ReportResponse, Vendor } from "../../shared/types.ts";
 import { TrafficMap, type CountryFill, type MapLabel, type MapLayer, type MapLine } from "../components/TrafficMap.tsx";
@@ -33,9 +34,10 @@ interface Props {
 	pops: Pop[];
 	vendorIds: string[];
 	onVendorIds: (ids: string[]) => void;
+	view?: "map" | "chart";
 }
 
-export function CoverageView({ range, pops, vendorIds, onVendorIds }: Props) {
+export function CoverageView({ range, pops, vendorIds, onVendorIds, view = "map" }: Props) {
 	const [sourceId, setSourceId] = useState<SourceId>("dns");
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const source = SOURCES[sourceId];
@@ -151,36 +153,40 @@ export function CoverageView({ range, pops, vendorIds, onVendorIds }: Props) {
 				{(report.loading || vendors.loading) && <span className="muted loading">Loading…</span>}
 			</nav>
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={[popLayer]}
-					mode="pop"
-					selectedKey={selectedKey}
-					onSelect={setSelectedKey}
-					lines={lines}
-					markers={vendorMarkers(vendors.data, vendorIds)}
-					labels={labels}
-					onLabelClick={(key) => key.length === 2 && setSelectedKey(key === selectedKey ? null : key)}
-					countryFill={countryFill}
-					popupFor={popupFor}
-					legend={
-						<>
-							<span>
-								<i className="legend-badge">Users in …</i> where users are (country level)
-							</span>
-							<span>
-								<i className="line-swatch" style={{ background: IN_COUNTRY }} /> → served by a POP in the same country
-							</span>
-							<span>
-								<i className="line-swatch" style={{ background: CROSS_BORDER }} /> → served from another country
-							</span>
-							<span>
-								<i className="ring" style={{ borderColor: POP_CIRCLE }} /> {source.label} per POP
-							</span>
-							<span className="muted">Line width: volume · click a badge to focus</span>
-						</>
-					}
-				/>
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={[popLayer]}
+						mode="pop"
+						selectedKey={selectedKey}
+						onSelect={setSelectedKey}
+						lines={lines}
+						markers={vendorMarkers(vendors.data, vendorIds)}
+						labels={labels}
+						onLabelClick={(key) => key.length === 2 && setSelectedKey(key === selectedKey ? null : key)}
+						countryFill={countryFill}
+						popupFor={popupFor}
+						legend={
+							<>
+								<span>
+									<i className="legend-badge">Users in …</i> where users are (country level)
+								</span>
+								<span>
+									<i className="line-swatch" style={{ background: IN_COUNTRY }} /> → served by a POP in the same country
+								</span>
+								<span>
+									<i className="line-swatch" style={{ background: CROSS_BORDER }} /> → served from another country
+								</span>
+								<span>
+									<i className="ring" style={{ borderColor: POP_CIRCLE }} /> {source.label} per POP
+								</span>
+								<span className="muted">Line width: volume · click a badge to focus</span>
+							</>
+						}
+					/>
+				) : (
+					<CoverageCharts range={range} pops={pops} selectedKey={selectedKey} report={source.report} countryDim={source.country} coloDim={source.colo} metric={source.metric} unit={source.unit} />
+				)}
 				<aside className="sidebar">
 					<Status loading={report.loading} error={report.data?.error ?? report.error} />
 					{report.data && !report.data.error && (

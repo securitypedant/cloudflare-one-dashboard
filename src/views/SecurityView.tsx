@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SecurityCharts } from "./charts.tsx";
 import { COUNTRIES } from "../../shared/countries.ts";
 import type { MapMode, Pop, RangeId, ReportResponse, ReportRow, TrafficPoint } from "../../shared/types.ts";
 import { TrafficMap, type MapLayer } from "../components/TrafficMap.tsx";
@@ -77,7 +78,7 @@ function byLocation(rows: ReportRow[], metric: (typeof METRICS)[MetricId], dim: 
 
 const isRate = (id: MetricId) => id === "dns" || id === "http" || id === "network";
 
-export function SecurityView({ range, pops }: { range: RangeId; pops: Pop[] }) {
+export function SecurityView({ range, pops, view = "map" }: { range: RangeId; pops: Pop[]; view?: "map" | "chart" }) {
 	const [metricId, setMetricId] = useState<MetricId>("dns");
 	const [mode, setMode] = useState<MapMode>("country");
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -183,20 +184,24 @@ export function SecurityView({ range, pops }: { range: RangeId; pops: Pop[] }) {
 				{current.loading && <span className="muted loading">Loading…</span>}
 			</nav>
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={[layer]}
-					mode={effectiveMode}
-					selectedKey={selectedKey}
-					onSelect={setSelectedKey}
-					popupFor={popupFor}
-					legend={
-						<span className="legend-gradient">
-							<i style={{ background: `linear-gradient(90deg, ${metric.color}2e, ${metric.color}d9)` }} />
-							{metric.label} {effectiveMode === "pop" ? "by data center" : "by user country"}
-						</span>
-					}
-				/>
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={[layer]}
+						mode={effectiveMode}
+						selectedKey={selectedKey}
+						onSelect={setSelectedKey}
+						popupFor={popupFor}
+						legend={
+							<span className="legend-gradient">
+								<i style={{ background: `linear-gradient(90deg, ${metric.color}2e, ${metric.color}d9)` }} />
+								{metric.label} {effectiveMode === "pop" ? "by data center" : "by user country"}
+							</span>
+						}
+					/>
+				) : (
+					<SecurityCharts range={range} metric={{ ...metric, rate: isRate(metricId) }} dim={dim} mode={effectiveMode} pops={pops} selectedKey={selectedKey} />
+				)}
 				<aside className="sidebar">
 					<section className="stats">
 						{(["dns", "http", "network"] as MetricId[]).map((id) => {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EntryExitCharts } from "./charts.tsx";
 import { CNI_SITES } from "../../shared/cni.ts";
 import { inRegion, REGIONS } from "../../shared/regions.ts";
 import type { Pop, RangeId, ReportResponse } from "../../shared/types.ts";
@@ -31,7 +32,7 @@ const sumBy = <T,>(items: T[], key: (t: T) => string, value: (t: T) => number) =
 	return [...m].sort((a, b) => b[1] - a[1]);
 };
 
-export function EntryExitView({ range, pops }: { range: RangeId; pops: Pop[] }) {
+export function EntryExitView({ range, pops, view = "map" }: { range: RangeId; pops: Pop[]; view?: "map" | "chart" }) {
 	const [regionId, setRegionId] = useState("");
 	const [showCni, setShowCni] = useState(true);
 	const report = useApi<ReportResponse>(`/api/report?id=entry_exit&range=${range}`);
@@ -131,41 +132,45 @@ export function EntryExitView({ range, pops }: { range: RangeId; pops: Pop[] }) 
 				{report.loading && <span className="muted loading">Loading…</span>}
 			</nav>
 			<main className="main">
-				<TrafficMap
-					pops={pops}
-					layers={[layer]}
-					mode="pop"
-					selectedKey={null}
-					onSelect={() => {}}
-					lines={lines}
-					markers={markers}
-					popupFor={popupFor}
-					legend={
-						<>
-							<span>
-								<i className="ring" style={{ borderColor: ENTRY_COLOR }} /> Where traffic enters Cloudflare
-							</span>
-							<span>
-								<i className="line-swatch" style={{ background: EXIT_LINE }} /> Exits at a different POP
-							</span>
-							{region && (
+				{view === "map" ? (
+					<TrafficMap
+						pops={pops}
+						layers={[layer]}
+						mode="pop"
+						selectedKey={null}
+						onSelect={() => {}}
+						lines={lines}
+						markers={markers}
+						popupFor={popupFor}
+						legend={
+							<>
 								<span>
-									<i className="ring" style={{ borderColor: VIOLATION }} /> Entry outside {region.label}
+									<i className="ring" style={{ borderColor: ENTRY_COLOR }} /> Where traffic enters Cloudflare
 								</span>
-							)}
-							{showCni && (
-								<>
+								<span>
+									<i className="line-swatch" style={{ background: EXIT_LINE }} /> Exits at a different POP
+								</span>
+								{region && (
 									<span>
-										<i className="ring" style={{ borderColor: CNI_V2 }} /> CNI (v2 available)
+										<i className="ring" style={{ borderColor: VIOLATION }} /> Entry outside {region.label}
 									</span>
-									<span>
-										<i className="ring" style={{ borderColor: CNI_V1 }} /> CNI (v1 only)
-									</span>
-								</>
-							)}
-						</>
-					}
-				/>
+								)}
+								{showCni && (
+									<>
+										<span>
+											<i className="ring" style={{ borderColor: CNI_V2 }} /> CNI (v2 available)
+										</span>
+										<span>
+											<i className="ring" style={{ borderColor: CNI_V1 }} /> CNI (v1 only)
+										</span>
+									</>
+								)}
+							</>
+						}
+					/>
+				) : (
+					<EntryExitCharts range={range} pops={pops} />
+				)}
 				<aside className="sidebar">
 					<Status loading={report.loading} error={report.data?.error ?? report.error} />
 					{report.data && !report.data.error && (

@@ -1,4 +1,4 @@
-import type { TunnelRow, TunnelsResponse } from "../../shared/admin.ts";
+import type { Role, TunnelRow, TunnelsResponse } from "../../shared/admin.ts";
 import { cfList, section } from "../cfapi.ts";
 import { graphql } from "../graphql.ts";
 import { DAY_MS, outdatedChecker } from "./common.ts";
@@ -84,9 +84,11 @@ export function toMagicRows(rows: HealthRow[]): TunnelRow[] {
 		.sort((a, b) => b.failureRate - a.failureRate);
 }
 
-export async function fetchTunnels(token: string, accountId: string): Promise<TunnelsResponse> {
+/** Tunnel health is shown to every viewer; origin IPs (internal network detail) only to admins. */
+export async function fetchTunnels(token: string, accountId: string, role: Role = "admin"): Promise<TunnelsResponse> {
 	const now = Date.now();
-	const [cfd, magic] = await Promise.all([
+	const window = { a: accountId, s: new Date(now - DAY_MS).toISOString(), e: new Date(now).toISOString() };
+	const [cfd, magic, hourly] = await Promise.all([
 		section(() => cfList<CfdTunnel>(token, `/accounts/${accountId}/cfd_tunnel`, "Cloudflare Tunnel Read", { is_deleted: "false" })),
 		section(async () => {
 			const query = `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) {
@@ -95,11 +97,29 @@ export async function fetchTunnels(token: string, accountId: string): Promise<Tu
 			const { data } = await graphql<{ viewer: { accounts: { checks: HealthRow[] }[] } }>(token, query, { a: accountId, s: new Date(now - DAY_MS).toISOString(), e: new Date(now).toISOString() });
 			return toMagicRows(data?.viewer.accounts[0]?.checks ?? []);
 		}),
+		section(async () => {
+			const query = `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+				checks: magicTransitTunnelHealthChecksAdaptiveGroups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 5000) { count dimensions { tunnelName datetimeHour resultStatus } }
+			} } }`;
+			type Row = { count: number; dimensions: { tunnelName: string; datetimeHour: string; resultStatus: string } };
+			const { data } = await graphql<{ viewer: { accounts: { checks: Row[] }[] } }>(token, query, window);
+			const m = new Map<string, { t: string; tunnel: string; checks: number; failed: number }>();
+			for (const r of data?.viewer.accounts[0]?.checks ?? []) {
+				const k = `${r.dimensions.datetimeHour}|${r.dimensions.tunnelName}`;
+				const row = m.get(k) ?? { t: r.dimensions.datetimeHour, tunnel: r.dimensions.tunnelName || "(unnamed)", checks: 0, failed: 0 };
+				row.checks += r.count;
+				if (r.dimensions.resultStatus !== "ok" && r.dimensions.resultStatus !== "healthy") row.failed += r.count;
+				m.set(k, row);
+			}
+			return [...m.values()].sort((a, b) => a.t.localeCompare(b.t));
+		}),
 	]);
 	const converted = cfd.ok ? toTunnelRows(cfd.data) : null;
+	const rows = converted?.rows.map((t) => (role === "admin" ? t : { ...t, connectors: t.connectors.map(({ originIp: _ip, ...c }) => c) }));
 	return {
-		cloudflared: converted ? { ok: true, data: converted.rows } : (cfd as Exclude<typeof cfd, { ok: true }>),
+		cloudflared: rows ? { ok: true, data: rows } : (cfd as Exclude<typeof cfd, { ok: true }>),
 		magicWan: magic,
+		magicWanHourly: hourly,
 		latestConnectorVersion: converted?.latest ?? null,
 	};
 }

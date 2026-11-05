@@ -1,4 +1,4 @@
-import type { Role, ThreatsResponse } from "../../shared/admin.ts";
+import type { Role, ThreatSeriesResponse, ThreatsResponse } from "../../shared/admin.ts";
 import type { RangeId } from "../../shared/types.ts";
 import { cfList, section } from "../cfapi.ts";
 import { fetchCategories } from "../categories.ts";
@@ -139,4 +139,49 @@ export async function fetchThreats(token: string, accountId: string, rangeId: Ra
 				}
 			: {}),
 	};
+}
+
+/** Threat totals per hour (24h/7d) or day (30d/90d): security-category blocks, blocked DNS, DLP, AV and sandbox. */
+export async function fetchThreatSeries(token: string, accountId: string, rangeId: RangeId): Promise<ThreatSeriesResponse> {
+	const { start, end } = rangeDates(rangeId);
+	const rollup = RANGE_ROLLUP[rangeId];
+	const bucket = rollup === "1d" ? ("day" as const) : ("hour" as const);
+	const vars = { a: accountId, s: start.toISOString(), e: end.toISOString() };
+	const node = (body: string) => `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) { rows: ${body} } } }`;
+	const points = await section(async () => {
+		const [catIds, dns, http] = await Promise.all([
+			securityCategoryIds(token, accountId).catch(() => new Map<number, string>()),
+			graphql<{ viewer: { accounts: { rows: { sum: { queries: number; queryCategoryIdArray: number[]; queryCategoryIdCountArray: number[] }; dimensions: { datetime: string } }[] }[] } }>(
+				token,
+				node(`cf1GatewayDns${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e, resolverDecision_like: "blocked%" }, limit: 10000, orderBy: [datetime_ASC]) {
+					sum { queries queryCategoryIdArray queryCategoryIdCountArray } dimensions { datetime }
+				}`),
+				vars,
+			),
+			graphql<{ viewer: { accounts: { rows: { sum: { dlpMatchedRequestsTotal: number; avBlockedFiles: number; sandboxBlocks: number }; dimensions: { datetime: string } }[] }[] } }>(
+				token,
+				node(`cf1GatewayHttp${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 10000, orderBy: [datetime_ASC]) {
+					sum { dlpMatchedRequestsTotal avBlockedFiles sandboxBlocks } dimensions { datetime }
+				}`),
+				vars,
+			),
+		]);
+		const by = new Map<string, { t: string; securityBlocks: number; blockedDns: number; dlpMatches: number; avBlocked: number; sandboxBlocked: number }>();
+		const at = (t: string) => by.get(t) ?? by.set(t, { t, securityBlocks: 0, blockedDns: 0, dlpMatches: 0, avBlocked: 0, sandboxBlocked: 0 }).get(t)!;
+		for (const r of dns.data?.viewer.accounts[0]?.rows ?? []) {
+			const p = at(r.dimensions.datetime);
+			p.blockedDns += r.sum.queries;
+			r.sum.queryCategoryIdArray.forEach((id, i) => {
+				if (catIds.has(id)) p.securityBlocks += r.sum.queryCategoryIdCountArray[i] ?? 0;
+			});
+		}
+		for (const r of http.data?.viewer.accounts[0]?.rows ?? []) {
+			const p = at(r.dimensions.datetime);
+			p.dlpMatches += r.sum.dlpMatchedRequestsTotal;
+			p.avBlocked += r.sum.avBlockedFiles;
+			p.sandboxBlocked += r.sum.sandboxBlocks;
+		}
+		return [...by.values()].sort((a, b) => a.t.localeCompare(b.t));
+	});
+	return { range: rangeId, bucket, points };
 }

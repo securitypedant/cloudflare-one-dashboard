@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TunnelCharts } from "./charts.tsx";
 import type { TunnelRow, TunnelsResponse } from "../../shared/admin.ts";
 import type { Pop } from "../../shared/types.ts";
 import { DataTable } from "../components/DataTable.tsx";
@@ -27,7 +28,7 @@ interface AtPop {
 	failureRate?: number;
 }
 
-export function TunnelsView({ pops }: { pops: Pop[] }) {
+export function TunnelsView({ pops, view = "map" }: { pops: Pop[]; view?: "map" | "chart" }) {
 	const res = useApi<TunnelsResponse>("/api/tunnels");
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	// Magic WAN health checks run from every Cloudflare data center, so it starts hidden to keep the map readable.
@@ -85,55 +86,59 @@ export function TunnelsView({ pops }: { pops: Pop[] }) {
 
 	return (
 		<main className="main">
-			<TrafficMap
-				pops={pops}
-				layers={[layer]}
-				mode="pop"
-				selectedKey={selectedKey}
-				onSelect={setSelectedKey}
-				lines={lines}
-				popupFor={popupFor}
-				legend={
-					<>
-						{["healthy", "degraded", "down", "inactive"].map((s) => (
-							<span key={s}>
-								<i className="ring" style={{ borderColor: statusColor(s), background: `${statusColor(s)}33` }} /> {s}
-							</span>
-						))}
-						<span className="muted">Circle size: tunnels connected at that POP</span>
-					</>
-				}
-			>
-				<div className="map-filters" role="group" aria-label="Map filters">
-					<div className="map-filters-row">
-						<span className="muted">Show</span>
-						{KINDS.map((k) => (
-							<label key={k.id}>
-								<input type="checkbox" checked={kinds[k.id]} onChange={(e) => { setKinds((cur) => ({ ...cur, [k.id]: e.target.checked })); setFocus(""); }} /> {k.label}
-							</label>
-						))}
-					</div>
-					<div className="map-filters-row">
-						<span className="muted">Status</span>
-						{STATUSES.map((st) => (
-							<button key={st} type="button" className={`chip ${statuses.has(st) ? "on" : ""}`} style={{ borderColor: statusColor(st), color: statuses.has(st) ? statusColor(st) : undefined }} aria-pressed={statuses.has(st)} onClick={() => toggleStatus(st)}>
-								{st}
-							</button>
-						))}
-					</div>
-					<div className="map-filters-row">
-						<select value={focus} onChange={(e) => setFocus(e.target.value)} aria-label="Show one tunnel">
-							<option value="">All tunnels ({focusable.length})</option>
-							{focusable.map((t) => (
-								<option key={tunnelKey(t)} value={tunnelKey(t)}>
-									{t.name} ({t.status})
-								</option>
+			{view === "map" ? (
+				<TrafficMap
+					pops={pops}
+					layers={[layer]}
+					mode="pop"
+					selectedKey={selectedKey}
+					onSelect={setSelectedKey}
+					lines={lines}
+					popupFor={popupFor}
+					legend={
+						<>
+							{["healthy", "degraded", "down", "inactive"].map((s) => (
+								<span key={s}>
+									<i className="ring" style={{ borderColor: statusColor(s), background: `${statusColor(s)}33` }} /> {s}
+								</span>
 							))}
-						</select>
+							<span className="muted">Circle size: tunnels connected at that POP</span>
+						</>
+					}
+				>
+					<div className="map-filters" role="group" aria-label="Map filters">
+						<div className="map-filters-row">
+							<span className="muted">Show</span>
+							{KINDS.map((k) => (
+								<label key={k.id}>
+									<input type="checkbox" checked={kinds[k.id]} onChange={(e) => { setKinds((cur) => ({ ...cur, [k.id]: e.target.checked })); setFocus(""); }} /> {k.label}
+								</label>
+							))}
+						</div>
+						<div className="map-filters-row">
+							<span className="muted">Status</span>
+							{STATUSES.map((st) => (
+								<button key={st} type="button" className={`chip ${statuses.has(st) ? "on" : ""}`} style={{ borderColor: statusColor(st), color: statuses.has(st) ? statusColor(st) : undefined }} aria-pressed={statuses.has(st)} onClick={() => toggleStatus(st)}>
+									{st}
+								</button>
+							))}
+						</div>
+						<div className="map-filters-row">
+							<select value={focus} onChange={(e) => setFocus(e.target.value)} aria-label="Show one tunnel">
+								<option value="">All tunnels ({focusable.length})</option>
+								{focusable.map((t) => (
+									<option key={tunnelKey(t)} value={tunnelKey(t)}>
+										{t.name} ({t.status})
+									</option>
+								))}
+							</select>
+						</div>
+						{kinds["magic-wan"] && <div className="map-filters-hint muted">Magic WAN: each circle is a Cloudflare data center running health checks, coloured by its own results.</div>}
 					</div>
-					{kinds["magic-wan"] && <div className="map-filters-hint muted">Magic WAN: each circle is a Cloudflare data center running health checks, coloured by its own results.</div>}
-				</div>
-			</TrafficMap>
+				</TrafficMap>
+			) : (
+				<TunnelCharts data={d} />
+			)}
 			<aside className="sidebar">
 				<Status loading={res.loading} error={res.error} />
 				{d && (
