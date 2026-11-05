@@ -1,6 +1,6 @@
-# Cloudflare One Dashboard
+# Cloudflare One Ops Dashboard
 
-A per-customer dashboard for Cloudflare One with reports that aren't in dash.cloudflare.com. It runs as one Cloudflare Worker (Static Assets, API, and Logpush ingestion), and each deployment serves a single account behind Cloudflare Access.
+A read-only operational dashboard for a Cloudflare One account, with reports that aren't in dash.cloudflare.com. It complements the Cloudflare dashboard, which is still where you configure the account; this one only views your own account's data. It runs as one Cloudflare Worker (Static Assets, API, and Logpush ingestion), and each deployment serves a single account behind Cloudflare Access.
 
 Answers: *how much does the size and spread of Cloudflare's network matter for my traffic?*
 

@@ -99,9 +99,9 @@ export default function App() {
 		<div className="app">
 			<header className="header">
 				<div className="title">
-					<h1>Cloudflare One Dashboard</h1>
+					<h1>Cloudflare One Ops Dashboard</h1>
 					<p className="muted">
-						Where your Zero Trust traffic meets the Cloudflare network
+						Read-only operational view of your account. Make changes in the Cloudflare dashboard
 						{me.data && (
 							<span>
 								{" "}· {me.data.email} ({me.data.role})
