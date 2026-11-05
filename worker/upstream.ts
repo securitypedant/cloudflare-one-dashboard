@@ -36,16 +36,30 @@ export async function readJson<T>(res: Response, maxBytes: number): Promise<T> {
  * Cache a validated value (not the raw upstream response) in the colo's Cache API. Only data that
  * passed `loader`'s parsing and validation is stored, so an anomalous upstream body is never pinned.
  */
-export async function cachedValue<T>(ctx: ExecutionContext | undefined, name: string, ttlSeconds: number, loader: () => Promise<T>): Promise<T> {
+export async function cachedValue<T>(ctx: ExecutionContext | undefined, name: string, ttlSeconds: number | ((value: T) => number), loader: () => Promise<T>): Promise<T> {
 	const key = new Request(`https://api-cache.internal/__upstream/${name}`);
 	const hit = await caches.default.match(key);
 	if (hit) return (await hit.json()) as T;
-	const value = await loader();
-	const put = caches.default.put(key, Response.json(value, { headers: { "Cache-Control": `max-age=${ttlSeconds}` } }));
-	if (ctx) ctx.waitUntil(put);
-	else await put;
-	return value;
+	// Concurrent misses in this isolate share one upstream load.
+	const pending = inFlight.get(name) as Promise<T> | undefined;
+	if (pending) return pending;
+	const load = (async () => {
+		const value = await loader();
+		const ttl = typeof ttlSeconds === "function" ? ttlSeconds(value) : ttlSeconds;
+		const put = caches.default.put(key, Response.json(value, { headers: { "Cache-Control": `max-age=${ttl}` } }));
+		if (ctx) ctx.waitUntil(put);
+		else await put;
+		return value;
+	})();
+	inFlight.set(name, load);
+	try {
+		return await load;
+	} finally {
+		inFlight.delete(name);
+	}
 }
+
+const inFlight = new Map<string, Promise<unknown>>();
 
 /** Run async tasks with at most `limit` in flight; results keep input order. */
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<PromiseSettledResult<R>[]> {

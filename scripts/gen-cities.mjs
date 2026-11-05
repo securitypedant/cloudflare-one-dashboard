@@ -3,7 +3,7 @@
 // used to place DEX user cities (Cloudflare's ISP IP geolocation) on the map.
 // Requires `unzip` on PATH. Re-run occasionally:  node scripts/gen-cities.mjs
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fetchPinned } from "./lib/pinned.mjs";
@@ -12,7 +12,10 @@ const dir = mkdtempSync(join(tmpdir(), "geonames-"));
 const zip = join(dir, "cities15000.zip");
 const archive = await fetchPinned("https://download.geonames.org/export/dump/cities15000.zip");
 writeFileSync(zip, archive);
-const tsv = execFileSync("unzip", ["-p", zip], { maxBuffer: 64 * 1024 * 1024 }).toString("utf8");
+// Absolute path so a modified PATH can't substitute the binary.
+const UNZIP = ["/usr/bin/unzip", "/bin/unzip"].find((p) => existsSync(p));
+if (!UNZIP) throw new Error("unzip not found at /usr/bin/unzip or /bin/unzip");
+const tsv = execFileSync(UNZIP, ["-p", zip], { maxBuffer: 64 * 1024 * 1024 }).toString("utf8");
 
 // Columns: 0 id, 1 name, 2 asciiname, 4 lat, 5 lon, 8 country, 10 admin1, 14 population
 const lines = [];

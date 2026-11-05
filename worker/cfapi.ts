@@ -28,7 +28,7 @@ interface Envelope<T> {
 export async function cfGet<T>(token: string, path: string, permission: string, params: Record<string, string | number> = {}): Promise<Envelope<T>> {
 	const url = new URL(`${API}${path}`);
 	for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
 	const body = await readJson<Envelope<T>>(res, MAX_BYTES).catch(() => null);
 	if (res.status === 403 || (res.status === 401 && body?.errors?.some((e) => e.code === 10000))) throw new PermissionError(permission);
 	if (!res.ok || !body?.success) {

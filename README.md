@@ -60,10 +60,10 @@ Logpush jobs ──▶ R2 cf1-dashboard-logs/logpush/<dataset>/<YYYYMMDD>/*.log.
                                  ingested_objects, logpush_sources, dead_letters
 ```
 
-- Notifications are accepted only for create actions (`PutObject`, `CopyObject`, `CompleteMultipartUpload`) on the bucket named in `LOGPUSH_BUCKET`, and only for keys `logpush/<supported dataset>/….log.gz`. Restrict write access to the bucket to the Logpush R2 token: anything that can write there can add data to the dashboard.
+- Notifications are accepted only for create actions (`PutObject`, `CopyObject`, `CompleteMultipartUpload`) from `CLOUDFLARE_ACCOUNT_ID` on the bucket named in `LOGPUSH_BUCKET`, and only for keys `logpush/<supported dataset>/….log.gz`. Records timestamped more than 1 hour in the future or older than `RETENTION_DAYS` are counted as invalid, so they can't stretch coverage windows. Restrict write access to the bucket to the Logpush R2 token: anything that can write there can add data to the dashboard.
 - Ingestion limits (`LIMITS` in `worker/logpush.ts`): 256 MiB compressed object, 2 GiB decompressed, 1 MiB per line, 100k distinct aggregate rows per object, 128 characters per key string. An object over a limit is rejected without retries and recorded in `dead_letters`.
 - Retention: a daily cron (`17 3 * * *`) deletes hourly aggregates older than `RETENTION_DAYS` (default 400), `ingested_objects` rows older than 45 days, and dead letters older than 90 days, and moves `logpush_sources.first_record` forward to the cutoff. Raw logs expire from R2 after 30 days (lifecycle rule `expire-raw-logpush`).
-- Ingestion status: `GET /api/logpush/status` (coverage per dataset plus the dead-letter count).
+- Ingestion status: `GET /api/logpush/status` (coverage per dataset plus the dead-letter count; configured field lists for admins only).
 - Dataset-to-field mapping: `LOGPUSH_SOURCES` in `worker/logpush.ts`.
 
 ### Replaying failed objects
@@ -118,10 +118,10 @@ Logpush pricing: the first 25 GB per month to R2 is included, then $0.03/GB ([pr
 ## Security model
 
 - **Authentication:** every `/api/*` request must carry a valid Cloudflare Access JWT (`Cf-Access-Jwt-Assertion` header or `CF_Authorization` cookie) for the application set in `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`. The signature, issuer, audience and expiry are verified against the team's published keys. If either var is missing, the API fails closed (`misconfigured`). `ALLOW_UNAUTHENTICATED=true` (only in `.dev.vars`) skips the check for `localhost` requests and has no effect on any other hostname.
-- **Roles:** the viewer's role comes from their Access identity (`/cdn-cgi/access/get-identity`, cached 5 minutes per token). Members of a group listed in `ADMIN_GROUPS` (name, email or id) are admins; everyone else is a viewer, including when the identity can't be read. Admin endpoints (`/api/posture`, `/api/devices`, `/api/tunnels`, `/api/changes`, `/api/users`, `/api/user`) return 403 to viewers, and admin responses are cached under a separate key so they're never served to viewers. Shared endpoints (`/api/identity`, `/api/threats`) omit user-level fields for viewers.
+- **Roles:** the viewer's role comes from their Access identity (`/cdn-cgi/access/get-identity`, cached 5 minutes per token). The identity is only looked up on `DASHBOARD_HOSTNAME` (requests on any other hostname get the viewer role). Members of a group listed in `ADMIN_GROUPS` (name, email or id) are admins; everyone else is a viewer, including when the identity can't be read. Admin endpoints (`/api/posture`, `/api/devices`, `/api/tunnels`, `/api/changes`, `/api/users`, `/api/user`) return 403 to viewers, and admin responses are cached under a separate key so they're never served to viewers. Shared endpoints (`/api/identity`, `/api/threats`) omit user-level fields for viewers.
 - **Errors:** responses carry fixed codes (`bad_request`, `unauthorized`, `misconfigured`, `rate_limited`, `upstream_error`). Upstream and D1 error text goes to Worker logs only.
-- **Upstream data:** responses from speed.cloudflare.com, sasecloudmap.com and the Cloudflare API are read with byte limits, validated, and only the validated result is cached. Vendor lists are fetched with at most 3 requests in flight.
-- **UI:** map popups are built with DOM APIs (no HTML strings). `public/_headers` sets a CSP (`default-src 'self'`, `frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
+- **Upstream data:** responses from speed.cloudflare.com, sasecloudmap.com and the Cloudflare API are read with byte limits and timeouts, validated, and only the validated result is cached (concurrent misses share one fetch; a partial vendor list is cached for 1 hour instead of 24). Vendor lists are fetched with at most 3 requests in flight. Access signing keys are re-fetched for an unknown key ID at most once a minute.
+- **UI:** map popups are built with DOM APIs (no HTML strings). Popup colours must be hex values. `public/_headers` sets a CSP (`default-src 'self'`, `style-src 'self'` with no inline styles, `frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy`.
 - **Local dev:** `vite.config.ts` denies `.dev.vars*` and `wrangler.jsonc` (in addition to Vite's defaults) so the dev server never serves them.
 
 ## Generated data
@@ -192,7 +192,7 @@ The Wrangler OAuth token has no Zero Trust scope, so category names show as IDs 
    - **Cloudflare Tunnel Read**: tunnel health.
    - **Account Settings Read**: audit log (Changes tab).
 
-   Each section reports the permission it's missing instead of failing the page. Set `ADMIN_GROUPS` to the group(s) that should get the admin view.
+   Each section reports the permission it's missing instead of failing the page. Set `ADMIN_GROUPS` to the group(s) that should get the admin view, and `DASHBOARD_HOSTNAME` to the dashboard's hostname.
 3. `npm run deploy`
 4. Create the Logpush jobs (above).
 5. Serve it only through the Access-protected custom domain (`routes` in `wrangler.jsonc`). `workers_dev` and `preview_urls` stay off. The Worker also verifies the Access JWT itself, so a missing or misconfigured Access application fails closed instead of exposing data.

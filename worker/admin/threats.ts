@@ -63,34 +63,30 @@ export async function fetchThreats(token: string, accountId: string, rangeId: Ra
 		section(() => fetchCategories(token, accountId)),
 	]);
 
-	const query = `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) {
-		blocked: cf1GatewayDns${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e, resolverDecision_like: "blocked%" }, limit: 2000, orderBy: [sum_queries_DESC]) {
+	// One query per dataset (repo convention: per-request read cap), each loaded as its own section.
+	const node = (body: string) => `query ($a: String!, $s: Time!, $e: Time!) { viewer { accounts(filter: { accountTag: $a }) { rows: ${body} } } }`;
+	const load = <R,>(body: string) =>
+		section(async () => (await graphql<{ viewer: { accounts: { rows: R[] }[] } }>(token, node(body), vars)).data?.viewer.accounts[0]?.rows ?? []);
+	type Blocked = { sum: { queries: number; queryCategoryIdArray: number[]; queryCategoryIdCountArray: number[] }; dimensions?: { email?: string } };
+	type AppRow = { sum: { requests: number; bodyBytesSent: number }; dimensions: { directApplicationIds: number[]; directApplicationStatuses: string[]; email?: string } };
+	type DlpRow = { sum: { dlpMatchedRequestsTotal: number; avBlockedFiles: number; sandboxBlocks: number }; dimensions: { httpHost: string; directApplicationIds: number[]; email?: string } };
+	const [blocked, appRows, dlpRows] = await Promise.all([
+		load<Blocked>(`cf1GatewayDns${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e, resolverDecision_like: "blocked%" }, limit: 2000, orderBy: [sum_queries_DESC]) {
 			sum { queries queryCategoryIdArray queryCategoryIdCountArray } ${isAdmin ? "dimensions { email }" : ""}
-		}
-		apps: cf1GatewayHttp${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 5000, orderBy: [sum_requests_DESC]) {
+		}`),
+		load<AppRow>(`cf1GatewayHttp${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 5000, orderBy: [sum_requests_DESC]) {
 			sum { requests bodyBytesSent } dimensions { directApplicationIds directApplicationStatuses${userDim} }
-		}
-		dlp: cf1GatewayHttp${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 500, orderBy: [sum_dlpMatchedRequestsTotal_DESC]) {
+		}`),
+		load<DlpRow>(`cf1GatewayHttp${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e }, limit: 500, orderBy: [sum_dlpMatchedRequestsTotal_DESC]) {
 			sum { dlpMatchedRequestsTotal avBlockedFiles sandboxBlocks } dimensions { httpHost directApplicationIds${userDim} }
-		}
-	} } }`;
-	type Acct = {
-		blocked: { sum: { queries: number; queryCategoryIdArray: number[]; queryCategoryIdCountArray: number[] }; dimensions?: { email?: string } }[];
-		apps: { sum: { requests: number; bodyBytesSent: number }; dimensions: { directApplicationIds: number[]; directApplicationStatuses: string[]; email?: string } }[];
-		dlp: { sum: { dlpMatchedRequestsTotal: number; avBlockedFiles: number; sandboxBlocks: number }; dimensions: { httpHost: string; directApplicationIds: number[]; email?: string } }[];
-	};
-	const data = await section(async () => {
-		const res = await graphql<{ viewer: { accounts: Acct[] } }>(token, query, vars);
-		return res.data?.viewer.accounts[0] ?? { blocked: [], apps: [], dlp: [] };
-	});
-	if (!data.ok) return { range: rangeId, securityCategories: data, shadowIt: data, dlp: data, malware: data };
-	const acct = data.data;
+		}`),
+	]);
 	const appName = (id: number | undefined) => (id === undefined ? "" : (names.ok && names.data.get(id)) || `App ${id}`);
 
 	// Security categories (blocked queries attributed to security-risk categories).
 	const security = new Map<number, number>();
 	const perUser = new Map<string, number>();
-	for (const r of acct.blocked) {
+	for (const r of blocked.ok ? blocked.data : []) {
 		let userHits = 0;
 		r.sum.queryCategoryIdArray.forEach((id, i) => {
 			if (!catIds.ok || !catIds.data.has(id)) return;
@@ -103,35 +99,41 @@ export async function fetchThreats(token: string, accountId: string, rangeId: Ra
 	}
 	const catName = (id: number) => (catIds.ok && catIds.data.get(id)) || (catNames.ok && catNames.data[id]) || `Category ${id}`;
 
-	const apps = appStatuses(acct.apps.map((r) => ({ ids: r.dimensions.directApplicationIds ?? [], statuses: r.dimensions.directApplicationStatuses ?? [], requests: r.sum.requests, bytesSent: r.sum.bodyBytesSent, email: r.dimensions.email })));
+	const apps = appStatuses((appRows.ok ? appRows.data : []).map((r) => ({ ids: r.dimensions.directApplicationIds ?? [], statuses: r.dimensions.directApplicationStatuses ?? [], requests: r.sum.requests, bytesSent: r.sum.bodyBytesSent, email: r.dimensions.email })));
+	const dlpData = dlpRows.ok ? dlpRows.data : [];
+	const failed = <T,>(s: { ok: boolean }) => s as unknown as { ok: false; error: string; missingPermission?: string } & T;
 
 	return {
 		range: rangeId,
-		securityCategories: catIds.ok
+		securityCategories: !blocked.ok
+			? failed(blocked)
+			: catIds.ok
 			? { ok: true, data: [...security].map(([id, queries]) => ({ id, name: catName(id), queries })).sort((a, b) => b.queries - a.queries) }
 			: catIds,
-		shadowIt: {
+		shadowIt: !appRows.ok ? failed(appRows) : {
 			ok: true,
 			data: [...apps]
 				.map(([id, a]) => ({ id, name: appName(id), status: a.status, requests: a.requests, bytesSent: a.bytesSent, ...(isAdmin ? { users: a.users.size } : {}) }))
 				.sort((a, b) => b.requests - a.requests)
 				.slice(0, 200),
 		},
-		dlp: {
+		dlp: !dlpRows.ok ? failed(dlpRows) : {
 			ok: true,
-			data: acct.dlp
+			data: dlpData
 				.filter((r) => r.sum.dlpMatchedRequestsTotal > 0)
 				.map((r) => ({ host: r.dimensions.httpHost, app: appName(r.dimensions.directApplicationIds?.[0]), matches: r.sum.dlpMatchedRequestsTotal, ...(isAdmin ? { user: r.dimensions.email ?? "" } : {}) })),
 		},
-		malware: {
+		malware: !dlpRows.ok ? failed(dlpRows) : {
 			ok: true,
-			data: acct.dlp
+			data: dlpData
 				.filter((r) => r.sum.avBlockedFiles > 0 || r.sum.sandboxBlocks > 0)
 				.map((r) => ({ host: r.dimensions.httpHost, avBlocked: r.sum.avBlockedFiles, sandboxBlocked: r.sum.sandboxBlocks, ...(isAdmin ? { user: r.dimensions.email ?? "" } : {}) })),
 		},
 		...(isAdmin
 			? {
-					targetedUsers: perUser.has("REDACTED")
+					targetedUsers: !blocked.ok
+						? failed(blocked)
+						: perUser.has("REDACTED")
 						? { ok: false as const, missingPermission: "Zero Trust: PII Read", error: 'Add "Zero Trust: PII Read" to the API token to see user names.' }
 						: { ok: true as const, data: [...perUser].map(([email, queries]) => ({ email, queries })).sort((a, b) => b.queries - a.queries).slice(0, 50) },
 				}

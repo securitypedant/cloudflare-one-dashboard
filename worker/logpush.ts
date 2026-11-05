@@ -227,8 +227,12 @@ export class Aggregator {
 
 	private readonly spec: SourceSpec;
 
-	constructor(spec: SourceSpec) {
+	/** Records outside [minTs, maxTs] (Unix seconds) are counted as invalid, so forged far-future or ancient timestamps can't stretch coverage. */
+	private readonly window: { minTs: number; maxTs: number };
+
+	constructor(spec: SourceSpec, window: { minTs: number; maxTs: number } = { minTs: 0, maxTs: Number.MAX_SAFE_INTEGER }) {
 		this.spec = spec;
+		this.window = window;
 	}
 
 	get size() {
@@ -252,7 +256,7 @@ export class Aggregator {
 
 	add(record: LogRecord) {
 		const ts = toUnixSeconds(record[this.spec.timeField]);
-		if (ts === null) {
+		if (ts === null || ts < this.window.minTs || ts > this.window.maxTs) {
 			this.invalid++;
 			return;
 		}
@@ -418,7 +422,14 @@ export type IngestResult =
 	| { status: "ingested"; source: LogpushSource; records: number; invalid: number; rows: number }
 	| { status: "duplicate" | "skipped" | "rejected"; reason: string };
 
-export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database }, key: string): Promise<IngestResult> {
+/** Accepted record time window: up to RETENTION_DAYS old and at most FUTURE_SKEW_SECONDS ahead of now. */
+export const FUTURE_SKEW_SECONDS = 3600;
+
+export function recordWindow(nowSec: number, retentionDays = DEFAULT_RETENTION_DAYS) {
+	return { minTs: nowSec - retentionDays * 86400, maxTs: nowSec + FUTURE_SKEW_SECONDS };
+}
+
+export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database; RETENTION_DAYS?: string }, key: string): Promise<IngestResult> {
 	const source = sourceFromKey(key);
 	if (!source) return { status: "skipped", reason: "not a Logpush object for a supported dataset" };
 	if (await env.DB.prepare("SELECT 1 FROM ingested_objects WHERE key = ?").bind(key).first()) {
@@ -431,7 +442,7 @@ export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database }, key:
 		throw new IngestLimitError(`object is ${object.size} bytes (limit ${LIMITS.maxObjectBytes})`);
 	}
 
-	const agg = new Aggregator(LOGPUSH_SOURCES[source]);
+	const agg = new Aggregator(LOGPUSH_SOURCES[source], recordWindow(Math.floor(Date.now() / 1000), Number(env.RETENTION_DAYS) || undefined));
 	const text = object.body
 		.pipeThrough(new DecompressionStream("gzip"))
 		.pipeThrough(byteLimit(LIMITS.maxDecompressedBytes))
@@ -463,12 +474,16 @@ export interface QueueEnv {
 	DB: D1Database;
 	/** Bucket name the notifications must come from (the R2 binding's bucket). */
 	LOGPUSH_BUCKET?: string;
+	/** Notifications must name this account. */
+	CLOUDFLARE_ACCOUNT_ID?: string;
+	RETENTION_DAYS?: string;
 }
 
 /** Reasons to ignore a notification before touching R2: wrong bucket, non-create action, malformed body. */
-export function rejectNotification(body: R2EventNotification | undefined, expectedBucket: string | undefined): string | null {
+export function rejectNotification(body: R2EventNotification | undefined, expectedBucket: string | undefined, expectedAccount?: string): string | null {
 	if (!body || typeof body.object?.key !== "string") return "malformed notification";
 	if (!CREATE_ACTIONS.has(body.action)) return `ignored action ${String(body.action)}`;
+	if (expectedAccount && body.account !== expectedAccount) return "notification is for a different account";
 	if (!expectedBucket) return "LOGPUSH_BUCKET is not configured";
 	if (body.bucket !== expectedBucket) return "notification is for a different bucket";
 	return null;
@@ -496,7 +511,7 @@ export async function handleQueue(batch: MessageBatch<R2EventNotification>, env:
 		return;
 	}
 	for (const message of batch.messages) {
-		const rejected = rejectNotification(message.body, env.LOGPUSH_BUCKET);
+		const rejected = rejectNotification(message.body, env.LOGPUSH_BUCKET, env.CLOUDFLARE_ACCOUNT_ID);
 		if (rejected) {
 			console.warn(JSON.stringify({ msg: "logpush notification ignored", reason: rejected }));
 			message.ack();

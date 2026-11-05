@@ -64,10 +64,10 @@ export async function fetchIdentity(token: string, accountId: string, rangeId: R
 
 	const users = await section(() => listAccessUsers(token, accountId));
 	const now = Date.now();
-	const loginsByUser = countBy(rows, (r) => r.dimensions.userUuid, (k) => k);
+	const loginsByUser = new Map(countBy(rows, (r) => r.dimensions.userUuid, (k) => k).map((r) => [r.key, r]));
 	const userRows = users.ok
 		? users.data.map((u) => {
-				const l = loginsByUser.find((x) => x.key === u.id);
+				const l = loginsByUser.get(u.id);
 				const last = u.last_successful_login ? Date.parse(u.last_successful_login) : NaN;
 				return {
 					email: u.email ?? "",

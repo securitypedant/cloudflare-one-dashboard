@@ -9,6 +9,10 @@ export interface PopupContent {
 	lines: PopupLine[];
 }
 
+/** Only hex colours reach CSSOM, so a future caller can't pass arbitrary CSS (e.g. url()) from data. */
+const HEX = /^#[0-9a-f]{3,8}$/i;
+const safeColor = (c: string | undefined) => (c && HEX.test(c) ? c : undefined);
+
 export function renderPopup({ title, lines }: PopupContent): HTMLElement {
 	const root = document.createElement("div");
 	const strong = document.createElement("strong");
@@ -18,13 +22,15 @@ export function renderPopup({ title, lines }: PopupContent): HTMLElement {
 		const row = document.createElement("div");
 		row.className = "popup-row";
 		const l = typeof line === "string" ? { text: line } : line;
-		if (l.swatch) {
+		const swatch = safeColor(l.swatch);
+		if (swatch) {
 			const i = document.createElement("i");
-			i.style.background = l.swatch;
+			i.style.background = swatch;
 			row.appendChild(i);
 		}
 		row.appendChild(document.createTextNode(l.text));
-		if (l.color) row.style.color = l.color;
+		const color = safeColor(l.color);
+		if (color) row.style.color = color;
 		if (l.muted) row.classList.add("muted");
 		root.appendChild(row);
 	}

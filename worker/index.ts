@@ -8,7 +8,7 @@ import { fetchUserLocations } from "./userLocations.ts";
 import { getCoverage, getDeadLetterCount, handleQueue, LOGPUSH_SOURCES, purgeOldData, type R2EventNotification } from "./logpush.ts";
 import { AccessError, accessToken, verifyAccessJwt } from "./access.ts";
 import { apiError, BadRequestError, cached, EMAIL_PARAM, json, parseParams, RateLimitedError } from "./http.ts";
-import { fetchIdentity as fetchAccessIdentity, roleFor, type Viewer } from "./rbac.ts";
+import { fetchIdentity as fetchAccessIdentity, identityHost, roleFor, type Viewer } from "./rbac.ts";
 import { fetchPosture } from "./admin/posture.ts";
 import { fetchIdentity } from "./admin/identity.ts";
 import { fetchDevices } from "./admin/devices.ts";
@@ -47,8 +47,13 @@ async function authorize(request: Request, env: Env, url: URL): Promise<Response
 		return apiError("unauthorized");
 	}
 	if (!env.ADMIN_GROUPS) return { email, role: "viewer" };
+	const host = identityHost(url.hostname, env.DASHBOARD_HOSTNAME);
+	if (!host) {
+		console.warn(JSON.stringify({ msg: "request hostname does not match DASHBOARD_HOSTNAME; viewer role" }));
+		return { email, role: "viewer" };
+	}
 	try {
-		return { email, role: roleFor(await fetchAccessIdentity(url.hostname, token), env.ADMIN_GROUPS) };
+		return { email, role: roleFor(await fetchAccessIdentity(host, token), env.ADMIN_GROUPS) };
 	} catch (err) {
 		// Fail safe: if the identity (groups) can't be read, the viewer gets the non-admin view.
 		console.warn(JSON.stringify({ msg: "access identity lookup failed", error: err instanceof Error ? err.message : String(err) }));
@@ -95,7 +100,8 @@ export default {
 						const c = coverage.find((x) => x.source === source);
 						return {
 							source,
-							fields: spec.fields,
+							// Configured Logpush field lists are operational detail for admins only.
+							...(viewer.role === "admin" ? { fields: spec.fields } : {}),
 							firstRecord: c ? new Date(c.firstRecord * 1000).toISOString() : null,
 							lastRecord: c ? new Date(c.lastRecord * 1000).toISOString() : null,
 						};
@@ -114,7 +120,7 @@ export default {
 						...(isTimeline ? {} : { offset: { values: ["0", "1"] as const, optional: true } }),
 					});
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+					return await cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
 						const opts = {
 							token,
 							accountId,
@@ -133,7 +139,7 @@ export default {
 				case "/api/report": {
 					const { params, canonical } = parseParams(url, { id: { values: REPORT_IDS }, range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
+					return await cached(ctx, url.pathname, canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => {
 						const report = await fetchReport(token, accountId, params.id, params.range);
 						return { body: report, cacheable: !report.error };
 					});
@@ -141,7 +147,7 @@ export default {
 
 				case "/api/dex": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS }, mode: { values: MAP_MODES } });
-					return cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
+					return await cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
 						body: await fetchDex(env.DB, params.mode, params.range),
 						cacheable: true,
 					}));
@@ -149,7 +155,7 @@ export default {
 
 				case "/api/user-locations": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
-					return cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
+					return await cached(ctx, url.pathname, canonical, LOGPUSH_CACHE_SECONDS, async () => ({
 						body: await fetchUserLocations(env.DB, params.range, await fetchPops(ctx)),
 						cacheable: true,
 					}));
@@ -163,7 +169,7 @@ export default {
 				case "/api/categories": {
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, url.pathname, canonical, DAY, async () => ({ body: await fetchCategories(token, accountId), cacheable: true }));
+					return await cached(ctx, url.pathname, canonical, DAY, async () => ({ body: await fetchCategories(token, accountId), cacheable: true }));
 				}
 
 				case "/api/me": {
@@ -175,13 +181,13 @@ export default {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, 300, async () => ({ body: await fetchPosture(token, accountId), cacheable: true }));
+					return await cached(ctx, scoped(url.pathname), canonical, 300, async () => ({ body: await fetchPosture(token, accountId), cacheable: true }));
 				}
 
 				case "/api/identity": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
 						body: await fetchIdentity(token, accountId, params.range, viewer.role),
 						cacheable: true,
 					}));
@@ -191,20 +197,20 @@ export default {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, 300, async () => ({ body: await fetchDevices(token, accountId), cacheable: true }));
+					return await cached(ctx, scoped(url.pathname), canonical, 300, async () => ({ body: await fetchDevices(token, accountId), cacheable: true }));
 				}
 
 				case "/api/tunnels": {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, 60, async () => ({ body: await fetchTunnels(token, accountId), cacheable: true }));
+					return await cached(ctx, scoped(url.pathname), canonical, 60, async () => ({ body: await fetchTunnels(token, accountId), cacheable: true }));
 				}
 
 				case "/api/threats": {
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
 						body: await fetchThreats(token, accountId, params.range, viewer.role),
 						cacheable: true,
 					}));
@@ -214,7 +220,7 @@ export default {
 					requireAdmin();
 					const { params, canonical } = parseParams(url, { range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, 120, async () => {
+					return await cached(ctx, scoped(url.pathname), canonical, 120, async () => {
 						const body = await fetchChanges(token, accountId, params.range);
 						return { body, cacheable: body.entries.ok };
 					});
@@ -224,7 +230,7 @@ export default {
 					requireAdmin();
 					const { canonical } = parseParams(url, NO_PARAMS);
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, 300, async () => {
+					return await cached(ctx, scoped(url.pathname), canonical, 300, async () => {
 						const body = await fetchUserList(token, accountId);
 						return { body, cacheable: body.users.length > 0 };
 					});
@@ -237,7 +243,7 @@ export default {
 					if (email !== null) lowered.searchParams.set("email", email.toLowerCase());
 					const { params, canonical } = parseParams(lowered, { email: EMAIL_PARAM, range: { values: RANGE_IDS } });
 					const { token, accountId } = requireApiToken(env);
-					return cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
+					return await cached(ctx, scoped(url.pathname), canonical, TRAFFIC_CACHE_SECONDS[params.range], async () => ({
 						body: await fetchUserDetail(token, accountId, params.email, params.range),
 						cacheable: true,
 					}));

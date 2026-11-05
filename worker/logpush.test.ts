@@ -10,6 +10,7 @@ import {
 	logpushSourceFor,
 	purgeOldData,
 	readLines,
+	recordWindow,
 	rejectNotification,
 	sourceFromKey,
 	toUnixSeconds,
@@ -133,6 +134,19 @@ describe("ingestion hardening", () => {
 		expect(rejectNotification({ ...ok, action: "DeleteObject" }, "logs")).toMatch(/ignored action/);
 		expect(rejectNotification(undefined, "logs")).toMatch(/malformed/);
 		expect(rejectNotification(ok, undefined)).toMatch(/not configured/);
+		expect(rejectNotification(ok, "logs", "a")).toBeNull();
+		expect(rejectNotification({ ...ok, account: "someone-else" }, "logs", "a")).toMatch(/different account/);
+	});
+
+	it("rejects records outside the plausible time window", () => {
+		const now = Date.UTC(2026, 10, 4) / 1000;
+		const agg = new Aggregator(LOGPUSH_SOURCES.gateway_dns, recordWindow(now, 400));
+		agg.add({ Datetime: new Date(now * 1000).toISOString(), ColoCode: "LHR", SrcIPCountryCode: "GB" });
+		agg.add({ Datetime: new Date((now + 2 * 3600) * 1000).toISOString(), ColoCode: "LHR", SrcIPCountryCode: "GB" });
+		agg.add({ Datetime: new Date((now - 401 * 86400) * 1000).toISOString(), ColoCode: "LHR", SrcIPCountryCode: "GB" });
+		expect(agg.records).toBe(1);
+		expect(agg.invalid).toBe(2);
+		expect(agg.lastRecord).toBe(now);
 	});
 
 	it("truncates record-derived keys and caps distinct aggregate rows", () => {

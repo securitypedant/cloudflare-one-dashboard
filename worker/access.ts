@@ -4,6 +4,8 @@
  * https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/validating-json/
  */
 
+import { readJson } from "./upstream.ts";
+
 export interface AccessConfig {
 	/** e.g. "myteam.cloudflareaccess.com" */
 	teamDomain: string;
@@ -18,8 +20,10 @@ interface Jwk extends JsonWebKey {
 }
 
 const JWKS_TTL_MS = 3600_000;
+/** Minimum gap between refetches triggered by an unknown key id (limits junk-token amplification). */
+const JWKS_REFETCH_MIN_MS = 60_000;
 const CLOCK_SKEW_SECONDS = 60;
-let jwksCache: { url: string; keys: Map<string, CryptoKey>; expires: number } | undefined;
+let jwksCache: { url: string; keys: Map<string, CryptoKey>; expires: number; fetchedAt: number } | undefined;
 
 const b64urlDecode = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(s.length / 4) * 4, "=")), (c) => c.charCodeAt(0));
 const decodeJson = (s: string) => JSON.parse(new TextDecoder().decode(b64urlDecode(s))) as Record<string, unknown>;
@@ -27,22 +31,25 @@ const decodeJson = (s: string) => JSON.parse(new TextDecoder().decode(b64urlDeco
 export type JwksFetcher = (url: string) => Promise<{ keys: Jwk[] }>;
 
 const defaultFetcher: JwksFetcher = async (url) => {
-	const res = await fetch(url);
+	const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
 	if (!res.ok) throw new AccessError(`JWKS fetch failed: HTTP ${res.status}`);
-	return (await res.json()) as { keys: Jwk[] };
+	return readJson<{ keys: Jwk[] }>(res, 64 * 1024);
 };
 
 async function signingKey(config: AccessConfig, kid: string, fetcher: JwksFetcher): Promise<CryptoKey> {
 	const url = `https://${config.teamDomain}/cdn-cgi/access/certs`;
-	const fresh = jwksCache && jwksCache.url === url && jwksCache.expires > Date.now();
-	if (!fresh || !jwksCache!.keys.has(kid)) {
+	const now = Date.now();
+	const fresh = jwksCache && jwksCache.url === url && jwksCache.expires > now;
+	// Refetch when stale, or for an unknown kid (key rotation) at most once per JWKS_REFETCH_MIN_MS.
+	const rotationCheck = fresh && !jwksCache!.keys.has(kid) && now - jwksCache!.fetchedAt >= JWKS_REFETCH_MIN_MS;
+	if (!fresh || rotationCheck) {
 		const { keys } = await fetcher(url);
 		const imported = new Map<string, CryptoKey>();
 		for (const jwk of keys ?? []) {
 			if (jwk.kty !== "RSA" || !jwk.kid) continue;
 			imported.set(jwk.kid, await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]));
 		}
-		jwksCache = { url, keys: imported, expires: Date.now() + JWKS_TTL_MS };
+		jwksCache = { url, keys: imported, expires: now + JWKS_TTL_MS, fetchedAt: now };
 	}
 	const key = jwksCache!.keys.get(kid);
 	if (!key) throw new AccessError("unknown signing key");

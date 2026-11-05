@@ -39,7 +39,7 @@ export function parseLocations(locations: unknown): Pop[] {
 
 export async function fetchPops(ctx?: ExecutionContext): Promise<Pop[]> {
 	return cachedValue(ctx, "pops-v1", TTL_SECONDS, async () => {
-		const res = await fetch(LOCATIONS_URL, { headers: { referer: "https://speed.cloudflare.com/" } });
+		const res = await fetch(LOCATIONS_URL, { headers: { referer: "https://speed.cloudflare.com/" }, signal: AbortSignal.timeout(10_000) });
 		if (!res.ok) throw new Error(`Cloudflare locations endpoint returned HTTP ${res.status}`);
 		return parseLocations(await readJson<unknown>(res, MAX_BYTES));
 	});

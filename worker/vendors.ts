@@ -18,6 +18,8 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_POINTS = 2000;
 const CONCURRENCY = 3;
 const TTL_SECONDS = 86400;
+/** Shorter cache when some vendors failed, so a transient outage isn't pinned for a day. */
+const PARTIAL_TTL_SECONDS = 3600;
 
 /** Validate a vendor GeoJSON FeatureCollection into [lon, lat, city] points; malformed features are dropped. */
 export function parseVendorPoints(geo: unknown): [number, number, string][] {
@@ -34,9 +36,9 @@ export function parseVendorPoints(geo: unknown): [number, number, string][] {
 }
 
 export async function fetchVendors(ctx?: ExecutionContext): Promise<Vendor[]> {
-	return cachedValue(ctx, "vendors-v1", TTL_SECONDS, async () => {
+	return cachedValue(ctx, "vendors-v1", (v) => (v.length < VENDORS.length ? PARTIAL_TTL_SECONDS : TTL_SECONDS), async () => {
 		const results = await mapLimit(VENDORS, CONCURRENCY, async ({ id, name }) => {
-			const res = await fetch(`https://sasecloudmap.com/api/${id}`);
+			const res = await fetch(`https://sasecloudmap.com/api/${id}`, { signal: AbortSignal.timeout(10_000) });
 			if (!res.ok) throw new Error(`${id}: HTTP ${res.status}`);
 			return { id, name, points: parseVendorPoints(await readJson<unknown>(res, MAX_BYTES)) };
 		});

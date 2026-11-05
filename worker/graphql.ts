@@ -50,6 +50,7 @@ export async function graphql<T>(
 			"X-Rate-Limit-Type": "account-based",
 		},
 		body: JSON.stringify({ query, variables }),
+		signal: AbortSignal.timeout(25_000),
 	});
 	const body = await readJson<{ data?: T | null; errors?: GraphQLErrorEntry[] | null }>(res, MAX_RESPONSE_BYTES).catch(() => null);
 	const errors = body?.errors ?? [];

@@ -24,7 +24,7 @@ async function fetchUserGateway(token: string, accountId: string, email: string,
 	const build = (filterByEmail: boolean) => {
 		const f = filterByEmail ? ", email: $u" : "";
 		const d = filterByEmail ? "" : " email";
-		const limit = filterByEmail ? 2000 : 10000;
+		const limit = filterByEmail ? 2000 : FALLBACK_LIMIT;
 		return `query ($a: String!, $s: Time!, $e: Time!${filterByEmail ? ", $u: String!" : ""}) { viewer { accounts(filter: { accountTag: $a }) {
 			dns: cf1GatewayDns${rollup}Groups(filter: { datetime_geq: $s, datetime_lt: $e${f} }, limit: ${limit}, orderBy: [sum_queries_DESC]) {
 				sum { queries queryCategoryIdArray queryCategoryIdCountArray } dimensions { resolverDecision coloName country${d} }
@@ -47,9 +47,16 @@ async function fetchUserGateway(token: string, accountId: string, email: string,
 		const acct = data?.viewer.accounts[0] ?? { dns: [], http: [], net: [] };
 		if ([...acct.dns, ...acct.http, ...acct.net].some((r) => isRedacted(r.dimensions.email))) throw new PermissionError(PII_PERMISSION);
 		const mine = <T extends { dimensions: { email?: string } }>(rows: T[]) => rows.filter((r) => r.dimensions.email?.toLowerCase() === email);
-		return { dns: mine(acct.dns), http: mine(acct.http), net: mine(acct.net) };
+		const result = { dns: mine(acct.dns), http: mine(acct.http), net: mine(acct.net) };
+		// Grouping is capped at FALLBACK_LIMIT rows; if a capped list has none of this user's rows, the
+		// answer is unknown rather than zero. Filtering by email (PII permission) gives an exact result.
+		const truncated = [acct.dns, acct.http, acct.net].some((rows) => rows.length >= FALLBACK_LIMIT);
+		if (truncated && !result.dns.length && !result.http.length && !result.net.length) throw new PermissionError(PII_PERMISSION);
+		return result;
 	}
 }
+
+const FALLBACK_LIMIT = 10_000;
 
 /** Without this permission, analytics return user emails as "REDACTED". */
 export const PII_PERMISSION = "Zero Trust: PII Read";

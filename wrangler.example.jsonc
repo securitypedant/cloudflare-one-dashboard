@@ -28,6 +28,7 @@
 	 * RETENTION_DAYS: hourly aggregates older than this are purged daily (cron below).
 	 * ADMIN_GROUPS: comma-separated group names/ids from the Access identity that get the admin view
 	 * (posture, devices, tunnels, change history, per-user pages). Empty = nobody is an admin.
+	 * DASHBOARD_HOSTNAME: the Access-protected hostname; roles are only looked up there.
 	 */
 	"vars": {
 		"CLOUDFLARE_ACCOUNT_ID": "<YOUR_ACCOUNT_ID>",
@@ -35,7 +36,8 @@
 		"ACCESS_AUD": "<YOUR_ACCESS_APPLICATION_AUD>",
 		"LOGPUSH_BUCKET": "cf1-dashboard-logs",
 		"RETENTION_DAYS": "400",
-		"ADMIN_GROUPS": ""
+		"ADMIN_GROUPS": "",
+		"DASHBOARD_HOSTNAME": "dashboard.example.com"
 	},
 	"triggers": {
 		"crons": ["17 3 * * *"]

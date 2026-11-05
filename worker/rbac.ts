@@ -42,12 +42,23 @@ export function roleFor(identity: Identity, adminGroups: string | undefined): Ro
 	return wanted.some((g) => have.has(g)) ? "admin" : "viewer";
 }
 
+/**
+ * Host to ask for the identity: the configured dashboard hostname, so the lookup never depends on the
+ * request's Host. Without DASHBOARD_HOSTNAME, falls back to the request hostname (route-bound).
+ * Returns null when a hostname is configured but the request arrived on a different one.
+ */
+export function identityHost(requestHost: string, configured: string | undefined): string | null {
+	const pinned = configured?.trim().toLowerCase();
+	if (!pinned) return requestHost;
+	return requestHost.toLowerCase() === pinned ? pinned : null;
+}
+
 /** Fetch the Access identity (with groups) for a verified token; cached briefly per token. */
 export async function fetchIdentity(hostname: string, token: string): Promise<Identity> {
 	const cacheKey = new Request(`https://api-cache.internal/__identity/${await sha256(token)}`);
 	const hit = await caches.default.match(cacheKey);
 	if (hit) return (await hit.json()) as Identity;
-	const res = await fetch(`https://${hostname}/cdn-cgi/access/get-identity`, { headers: { Cookie: `CF_Authorization=${token}` } });
+	const res = await fetch(`https://${hostname}/cdn-cgi/access/get-identity`, { headers: { Cookie: `CF_Authorization=${token}` }, signal: AbortSignal.timeout(5000) });
 	if (!res.ok) throw new Error(`get-identity returned HTTP ${res.status}`);
 	const identity = await readJson<Identity>(res, 256 * 1024);
 	const slim: Identity = { email: identity.email, groups: identity.groups };

@@ -5,7 +5,8 @@ import { coloToIata, toMagicRows, toTunnelRows } from "./tunnels.ts";
 import { appStatuses } from "./threats.ts";
 import { toAuditEntry } from "./changes.ts";
 import { toDeviceRows } from "./devices.ts";
-import { groupKeys, roleFor } from "../rbac.ts";
+import { groupKeys, identityHost, roleFor } from "../rbac.ts";
+import { flattenCategories } from "../categories.ts";
 import { BadRequestError, EMAIL_PARAM, parseParams } from "../http.ts";
 
 const NOW = Date.UTC(2026, 10, 4);
@@ -162,5 +163,26 @@ describe("pattern parameters", () => {
 		for (const q of ["email=nope", "email=a@b", "email=%3Cscript%3E@x.com", `email=${"a".repeat(260)}@x.com`, "email=a@x.com&email=b@x.com"]) {
 			expect(() => parse(q)).toThrow(BadRequestError);
 		}
+	});
+});
+
+describe("identity host pinning", () => {
+	it("uses the configured hostname and refuses others", () => {
+		expect(identityHost("dash.example.com", "Dash.Example.com")).toBe("dash.example.com");
+		expect(identityHost("evil.example.net", "dash.example.com")).toBeNull();
+		expect(identityHost("dash.example.com", "")).toBe("dash.example.com");
+		expect(identityHost("dash.example.com", undefined)).toBe("dash.example.com");
+	});
+});
+
+describe("category tree", () => {
+	it("flattens a bounded tree and skips malformed nodes", () => {
+		expect(flattenCategories([{ id: 1, name: "Security", subcategories: [{ id: 2, name: "Malware" }, { id: "x" }, null] }, { id: 3, name: "Ads", subcategories: "nope" }])).toEqual({ 1: "Security", 2: "Malware", 3: "Ads" });
+		let deep: unknown = [{ id: 99, name: "leaf" }];
+		for (let i = 0; i < 10; i++) deep = [{ id: i, name: `n${i}`, subcategories: deep }];
+		const out = flattenCategories(deep);
+		expect(out[99]).toBeUndefined();
+		expect(Object.keys(out).length).toBeLessThanOrEqual(5);
+		expect(flattenCategories({ not: "an array" })).toEqual({});
 	});
 });
