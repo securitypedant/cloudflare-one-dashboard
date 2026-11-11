@@ -220,6 +220,8 @@ export class Aggregator {
 	readonly rows = new Map<string, AggregateRow>();
 	readonly metricRows = new Map<string, MetricRow>();
 	readonly locationRows = new Map<string, LocationRow>();
+	/** Distinct record hours (unix seconds, hour-aligned); these are the only hours an object may claim as covered. */
+	readonly hours = new Set<number>();
 	records = 0;
 	invalid = 0;
 	firstRecord = Infinity;
@@ -264,6 +266,7 @@ export class Aggregator {
 		this.firstRecord = Math.min(this.firstRecord, ts);
 		this.lastRecord = Math.max(this.lastRecord, ts);
 		const hour = ts - (ts % 3600);
+		this.hours.add(hour);
 		for (const out of this.spec.outputs) {
 			const key = keyText(record[out.keyField]).toUpperCase();
 			const value = out.value ? out.value(record) : 1;
@@ -349,13 +352,101 @@ export function byteLimit(max: number): TransformStream<Uint8Array, Uint8Array> 
 	});
 }
 
+/**
+ * Coverage is stored as intervals over the hours that actually contain ingested records
+ * (logpush_coverage), not as one first..last span: a dead-lettered or sparse object must not
+ * make the hours between its records look ingested. Two covered hours further apart than this
+ * are separated by a real hole; nearer gaps (quiet stretches inside delivered data) are bridged.
+ */
+export const COVERAGE_GAP_SECONDS = 6 * 3600;
+
+export interface CoverageInterval {
+	/** Unix seconds, start of the first covered UTC hour. */
+	start: number;
+	/** Unix seconds, start of the last covered UTC hour (inclusive). */
+	end: number;
+}
+
+/** Disjoint sorted [start_hour, end_hour] runs of the given hours, bridging gaps up to COVERAGE_GAP_SECONDS. */
+export function coverageRuns(hours: Iterable<number>): CoverageInterval[] {
+	const sorted = [...hours].sort((a, b) => a - b);
+	const runs: CoverageInterval[] = [];
+	for (const hour of sorted) {
+		const last = runs[runs.length - 1];
+		if (last && hour - last.end <= COVERAGE_GAP_SECONDS) last.end = hour;
+		else runs.push({ start: hour, end: hour });
+	}
+	return runs;
+}
+
+/** Merge intervals nearer than COVERAGE_GAP_SECONDS into a disjoint sorted set (coverageRuns over intervals). */
+export function mergeCoverage(intervals: Iterable<CoverageInterval>): CoverageInterval[] {
+	const sorted = [...intervals].sort((a, b) => a.start - b.start || a.end - b.end);
+	const merged: CoverageInterval[] = [];
+	for (const iv of sorted) {
+		const last = merged[merged.length - 1];
+		if (last && iv.start - last.end <= COVERAGE_GAP_SECONDS) last.end = Math.max(last.end, iv.end);
+		else merged.push({ ...iv });
+	}
+	return merged;
+}
+
+async function readCoverageIntervals(db: D1Database, source: LogpushSource): Promise<CoverageInterval[]> {
+	const { results } = await db
+		.prepare("SELECT start_hour AS start, end_hour AS end FROM logpush_coverage WHERE source = ? ORDER BY start_hour")
+		.bind(source)
+		.all<CoverageInterval>();
+	return results;
+}
+
+/**
+ * One-time backfill for deployments that ingested before logpush_coverage existed: rebuild the
+ * intervals from the aggregate rows already in D1, which is exactly the record-hour set.
+ */
+async function backfillCoverage(db: D1Database, source: LogpushSource): Promise<CoverageInterval[]> {
+	const spec = LOGPUSH_SOURCES[source];
+	const queries: { sql: string; args: unknown[] }[] = [];
+	for (const out of spec.outputs) {
+		queries.push({ sql: "SELECT DISTINCT hour FROM traffic_hourly WHERE dataset = ? AND dimension = ?", args: [out.dataset, out.dimension] });
+	}
+	for (const m of spec.metrics ?? []) {
+		queries.push({ sql: "SELECT DISTINCT hour FROM metric_hourly WHERE metric = ? AND dimension = ?", args: [m.metric, m.dimension] });
+	}
+	if (spec.locations) queries.push({ sql: "SELECT DISTINCT hour FROM user_location_hourly", args: [] });
+	const hours = new Set<number>();
+	for (const q of queries) {
+		const { results } = await db.prepare(q.sql).bind(...q.args).all<{ hour: number }>();
+		for (const r of results) hours.add(r.hour);
+	}
+	return coverageRuns(hours);
+}
+
+/**
+ * True iff every hour the read path could serve lies inside one stored coverage interval:
+ * [floor(startSec), min(endSec, now) - FRESHNESS_SECONDS). The trailing freshness lag may be
+ * absent (Logpush hasn't delivered it yet) — same tolerance the isCovered endpoint check uses.
+ */
+export async function isWindowCovered(db: D1Database, source: LogpushSource, startSec: number, endSec: number, now: number): Promise<boolean> {
+	const firstHour = startSec - (startSec % 3600);
+	const lastHour = Math.floor((Math.min(endSec, now) - FRESHNESS_SECONDS - 1) / 3600) * 3600;
+	if (lastHour < firstHour) return true; // window is entirely inside the tolerated lag
+	// Stored intervals are separated by gaps > COVERAGE_GAP_SECONDS, so a fully covered window
+	// always lies inside exactly one interval.
+	const row = await db
+		.prepare("SELECT 1 FROM logpush_coverage WHERE source = ? AND start_hour <= ? AND end_hour >= ? LIMIT 1")
+		.bind(source, firstHour, lastHour)
+		.first();
+	return row !== null;
+}
+
 const ROWS_PER_STATEMENT = 20; // 5 bound parameters per row; D1 allows 100 per statement.
+const INTERVALS_PER_STATEMENT = 30; // 3 bound parameters per row
 
 /**
  * All writes for one object in a single D1 batch (one transaction). The plain INSERT into
  * ingested_objects comes first, so a concurrent duplicate delivery aborts the whole batch.
  */
-export function buildStatements(db: D1Database, key: string, source: LogpushSource, agg: Aggregator, now: number) {
+export function buildStatements(db: D1Database, key: string, source: LogpushSource, agg: Aggregator, now: number, coverage: CoverageInterval[] = []) {
 	const statements = [
 		db
 			.prepare("INSERT INTO ingested_objects (key, source, records, ingested_at) VALUES (?, ?, ?, ?)")
@@ -414,6 +505,16 @@ export function buildStatements(db: D1Database, key: string, source: LogpushSour
 				)
 				.bind(source, agg.firstRecord, agg.lastRecord, now),
 		);
+		// Replace the source's interval set with the merged one computed by the caller.
+		statements.push(db.prepare("DELETE FROM logpush_coverage WHERE source = ?").bind(source));
+		for (let i = 0; i < coverage.length; i += INTERVALS_PER_STATEMENT) {
+			const chunk = coverage.slice(i, i + INTERVALS_PER_STATEMENT);
+			statements.push(
+				db
+					.prepare(`INSERT INTO logpush_coverage (source, start_hour, end_hour) VALUES ${chunk.map(() => "(?, ?, ?)").join(", ")}`)
+					.bind(...chunk.flatMap((iv) => [source, iv.start, iv.end])),
+			);
+		}
 	}
 	return statements;
 }
@@ -453,7 +554,16 @@ export async function ingestObject(env: { LOGS: R2Bucket; DB: D1Database; RETENT
 		console.warn(JSON.stringify({ msg: "logpush object had no valid records", key, invalid: agg.invalid }));
 	}
 
-	await env.DB.batch(buildStatements(env.DB, key, source, agg, Math.floor(Date.now() / 1000)));
+	// Coverage claim: merge this object's record-hour runs into the stored intervals. The
+	// read-modify-write sits outside the atomic batch, so a concurrent ingest could lose
+	// intervals — that only under-claims coverage (extra GraphQL fallbacks), never overstates it.
+	let coverage: CoverageInterval[] = [];
+	if (agg.hours.size > 0) {
+		let existing = await readCoverageIntervals(env.DB, source);
+		if (existing.length === 0) existing = await backfillCoverage(env.DB, source);
+		coverage = mergeCoverage([...existing, ...coverageRuns(agg.hours)]);
+	}
+	await env.DB.batch(buildStatements(env.DB, key, source, agg, Math.floor(Date.now() / 1000), coverage));
 	return { status: "ingested", source, records: agg.records, invalid: agg.invalid, rows: agg.size };
 }
 
@@ -559,6 +669,8 @@ export async function purgeOldData(db: D1Database, now: number, retentionDays = 
 		db.prepare("DELETE FROM dead_letters WHERE received_at < ?").bind(now - DEAD_LETTER_RETENTION_DAYS * 86400),
 		// Data before the cutoff is gone, so Logpush no longer covers it.
 		db.prepare("UPDATE logpush_sources SET first_record = ? WHERE first_record < ?").bind(cutoff, cutoff),
+		db.prepare("DELETE FROM logpush_coverage WHERE end_hour < ?").bind(cutoff),
+		db.prepare("UPDATE logpush_coverage SET start_hour = ? WHERE start_hour < ?").bind(cutoff, cutoff),
 	]);
 	const [traffic, metrics, locations, objects, deadLetters] = results.map((r) => r.meta.changes ?? 0);
 	return { cutoff, traffic, metrics, locations, objects, deadLetters };

@@ -3,11 +3,14 @@ import {
 	Aggregator,
 	buildStatements,
 	byteLimit,
+	coverageRuns,
 	IngestLimitError,
 	isCovered,
+	isWindowCovered,
 	LIMITS,
 	LOGPUSH_SOURCES,
 	logpushSourceFor,
+	mergeCoverage,
 	purgeOldData,
 	readLines,
 	recordWindow,
@@ -201,7 +204,9 @@ describe("ingestion hardening", () => {
 		expect(result.cutoff).toBe(cutoff);
 		expect(sql.find((s) => s.query.startsWith("DELETE FROM user_location_hourly"))?.args).toEqual([cutoff]);
 		expect(sql.find((s) => s.query.startsWith("UPDATE logpush_sources"))?.args).toEqual([cutoff, cutoff]);
-		expect(sql).toHaveLength(6);
+		expect(sql.find((s) => s.query.startsWith("DELETE FROM logpush_coverage"))?.args).toEqual([cutoff]);
+		expect(sql.find((s) => s.query.startsWith("UPDATE logpush_coverage"))?.args).toEqual([cutoff, cutoff]);
+		expect(sql).toHaveLength(8);
 	});
 });
 
@@ -228,14 +233,72 @@ describe("buildStatements", () => {
 	it("records the object first, chunks upserts to stay within D1's 100 bound parameters, then updates coverage", () => {
 		const agg = new Aggregator(LOGPUSH_SOURCES.gateway_http);
 		for (let i = 0; i < 45; i++) agg.add({ Datetime: 1793787330, SourceIPCountryCode: `C${i}` });
-		const statements = buildStatements(fakeDb, "logpush/gateway_http/x.log.gz", "gateway_http", agg, 1) as unknown as {
+		const coverage = [{ start: 1793784000, end: 1793784000 }];
+		const statements = buildStatements(fakeDb, "logpush/gateway_http/x.log.gz", "gateway_http", agg, 1, coverage) as unknown as {
 			sql: string;
 			args: unknown[];
 		}[];
-		expect(statements).toHaveLength(1 + 3 + 1);
+		expect(statements).toHaveLength(1 + 3 + 1 + 2);
 		expect(statements[0].sql).toMatch(/^INSERT INTO ingested_objects/);
 		expect(statements.slice(1, 4).map((s) => s.args.length)).toEqual([100, 100, 25]);
 		expect(statements[4].sql).toMatch(/INSERT INTO logpush_sources/);
+		expect(statements[5].sql).toMatch(/^DELETE FROM logpush_coverage/);
+		expect(statements[6].sql).toMatch(/^INSERT INTO logpush_coverage/);
+		expect(statements[6].args).toEqual(["gateway_http", 1793784000, 1793784000]);
+	});
+});
+
+describe("coverage intervals", () => {
+	const H = 3600;
+
+	it("groups record hours into runs split by gaps larger than COVERAGE_GAP_SECONDS", () => {
+		const hours = [0, H, 2 * H, 8 * H, 9 * H, 100 * H];
+		const runs = coverageRuns(hours);
+		// 2H -> 8H is exactly COVERAGE_GAP_SECONDS (6h), so it merges; 9H -> 100H does not.
+		expect(runs).toEqual([
+			{ start: 0, end: 9 * H },
+			{ start: 100 * H, end: 100 * H },
+		]);
+	});
+
+	it("an object with two records 90 days apart claims only two hours, not the span", () => {
+		const runs = coverageRuns([0, 90 * 24 * H]);
+		expect(runs).toEqual([
+			{ start: 0, end: 0 },
+			{ start: 90 * 24 * H, end: 90 * 24 * H },
+		]);
+	});
+
+	it("merges stored intervals with new runs, bridging gaps up to COVERAGE_GAP_SECONDS", () => {
+		const merged = mergeCoverage([
+			{ start: 0, end: 2 * H },
+			{ start: 8 * H, end: 9 * H }, // 6h after 2H -> merges into one
+			{ start: 20 * H, end: 21 * H }, // 11h gap -> stays separate
+		]);
+		expect(merged).toEqual([
+			{ start: 0, end: 9 * H },
+			{ start: 20 * H, end: 21 * H },
+		]);
+	});
+
+	it("isWindowCovered requires the window up to the freshness lag inside one interval", async () => {
+		// One stored interval [0, 9h]: a query matches iff 0 <= firstHour and 9h >= lastHour.
+		const db = {
+			prepare: () => ({
+				bind: (...args: unknown[]) => ({
+					first: async () => (args[0] === "gateway_dns" && 0 <= (args[1] as number) && (args[2] as number) <= 9 * 3600 ? { n: 1 } : null),
+				}),
+			}),
+		} as unknown as D1Database;
+		// now = 11h: the lag (2h) trims required coverage to hour 8; interval [0,9h] satisfies it.
+		const now = 11 * 3600;
+		await expect(isWindowCovered(db, "gateway_dns", 0, 10 * 3600, now)).resolves.toBe(true);
+		await expect(isWindowCovered(db, "gateway_dns", 2 * 3600, 9 * 3600, now)).resolves.toBe(true);
+		// now = 13h: required coverage reaches hour 10, which the interval doesn't contain.
+		await expect(isWindowCovered(db, "gateway_dns", 0, 13 * 3600, 13 * 3600)).resolves.toBe(false);
+		// The tolerated lag: a window fully within FRESHNESS of now needs no interval at all.
+		await expect(isWindowCovered(db, "gateway_dns", 8 * 3600, 12 * 3600, 10 * 3600)).resolves.toBe(true);
+		await expect(isWindowCovered(db, "gateway_dns", 0, 0, now)).resolves.toBe(true);
 	});
 });
 

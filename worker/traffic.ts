@@ -1,7 +1,7 @@
 import { COUNTRIES } from "../shared/countries.ts";
 import { graphql } from "./graphql.ts";
 import { publicErrorMessage } from "./http.ts";
-import { getCoverage, isCovered, logpushSourceFor, queryAggregates, queryAggregateSeries } from "./logpush.ts";
+import { getCoverage, isCovered, isWindowCovered, logpushSourceFor, queryAggregates, queryAggregateSeries } from "./logpush.ts";
 import {
 	DATASETS,
 	RANGE_HOURS,
@@ -227,7 +227,9 @@ async function fromLogpush(
 	const endSec = Math.floor(end.getTime() / 1000);
 	try {
 		const coverage = (await getCoverage(db)).find((c) => c.source === source);
-		if (!isCovered(coverage, startSec, endSec, Math.floor(Date.now() / 1000))) return null;
+		const nowSec = Math.floor(Date.now() / 1000);
+		// Endpoint check (freshness/span) plus interval check (no un-ingested holes inside the window).
+		if (!isCovered(coverage, startSec, endSec, nowSec) || !(await isWindowCovered(db, source, startSec, endSec, nowSec))) return null;
 		const totals = await queryAggregates(db, dataset, mode, startSec, endSec);
 		return toLayer(mode, `Logpush ${source}`, totals, popsByIata, "logpush");
 	} catch (err) {
@@ -330,7 +332,7 @@ export async function fetchTimeline(opts: TrafficOptions): Promise<TimelineRespo
 		const e = Math.floor(end.getTime() / 1000);
 		try {
 			const coverage = (await getCoverage(db)).find((c) => c.source === lpSource);
-			if (isCovered(coverage, s, e, Math.floor(Date.now() / 1000))) {
+			if (isCovered(coverage, s, e, Math.floor(Date.now() / 1000)) && (await isWindowCovered(db, lpSource, s, e, Math.floor(Date.now() / 1000)))) {
 				const rows = await queryAggregateSeries(db, dataset, mode, s, e, bucket === "day" ? 86400 : 3600);
 				const { frames, totals } = toFrames(rows.map((r) => ({ t: new Date(r.bucket * 1000).toISOString(), key: r.key, value: r.value })));
 				return { ...base, frames, layer: toLayer(mode, `Logpush ${lpSource}`, totals, popsByIata, "logpush") };

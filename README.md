@@ -57,12 +57,13 @@ Logpush jobs ──▶ R2 cf1-dashboard-logs/logpush/<dataset>/<YYYYMMDD>/*.log.
                   ▼
                D1 cf1-dashboard: traffic_hourly (counts/sums), metric_hourly (DEX averages as n + total),
                                  user_location_hourly (city × ISP × POP, no IPs or device IDs),
-                                 ingested_objects, logpush_sources, dead_letters
+                                 ingested_objects, logpush_sources, logpush_coverage, dead_letters
 ```
 
 - Notifications are accepted only for create actions (`PutObject`, `CopyObject`, `CompleteMultipartUpload`) from `CLOUDFLARE_ACCOUNT_ID` on the bucket named in `LOGPUSH_BUCKET`, and only for keys `logpush/<supported dataset>/….log.gz`. Records timestamped more than 1 hour in the future or older than `RETENTION_DAYS` are counted as invalid, so they can't stretch coverage windows. Restrict write access to the bucket to the Logpush R2 token: anything that can write there can add data to the dashboard.
 - Ingestion limits (`LIMITS` in `worker/logpush.ts`): 256 MiB compressed object, 2 GiB decompressed, 1 MiB per line, 100k distinct aggregate rows per object, 128 characters per key string. An object over a limit is rejected without retries and recorded in `dead_letters`.
-- Retention: a daily cron (`17 3 * * *`) deletes hourly aggregates older than `RETENTION_DAYS` (default 400), `ingested_objects` rows older than 45 days, and dead letters older than 90 days, and moves `logpush_sources.first_record` forward to the cutoff. Raw logs expire from R2 after 30 days (lifecycle rule `expire-raw-logpush`).
+- Coverage: `logpush_coverage` stores merged intervals over the hours that actually contain ingested records (gaps up to `COVERAGE_GAP_SECONDS` = 6h are bridged; longer gaps stay uncovered). A query window is served from D1 only when its whole span up to the freshness lag sits inside one interval — so a dead-lettered, dropped, or sparse object leaves a hole that falls back to GraphQL instead of being served as complete data.
+- Retention: a daily cron (`17 3 * * *`) deletes hourly aggregates older than `RETENTION_DAYS` (default 400), `ingested_objects` rows older than 45 days, dead letters older than 90 days, and coverage intervals past the cutoff, and moves `logpush_sources.first_record` forward to the cutoff. Raw logs expire from R2 after 30 days (lifecycle rule `expire-raw-logpush`).
 - Ingestion status: `GET /api/logpush/status` (coverage per dataset plus the dead-letter count; configured field lists for full-access users only).
 - Dataset-to-field mapping: `LOGPUSH_SOURCES` in `worker/logpush.ts`.
 
