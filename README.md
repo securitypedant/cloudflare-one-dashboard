@@ -4,6 +4,12 @@ A read-only operational dashboard for a Cloudflare One account, with reports tha
 
 Answers: *how much does the size and spread of Cloudflare's network matter for my traffic?*
 
+![Traffic map: every Cloudflare POP with per-POP traffic circles for DNS, HTTP and Network, dataset totals and top data centers](public/cf1-dashboard-01.png)
+
+![Entry & exit map: where traffic enters Cloudflare, exit-at-a-different-POP arcs, CNI facilities, on-ramps and off-ramps](public/cf1-dashboard-02.png)
+
+![Threats & data: security-risk DNS blocks, DLP matches and malware blocked over time, plus Shadow IT app review](public/cf1-dashboard-03.png)
+
 ## Reports (tabs)
 
 Tabs are grouped into **Network**, **Security** and **Account**. Map pages have a **Map | Chart** toggle: Chart shows the same data over time (hourly for 24h/7d, daily for 30d/90d), with the top locations, the total and the change over the period. With `ADMIN_GROUPS = "*"` everyone who passes Access sees everything; listing group IDs instead limits the Account section and user-level detail to those groups (see Security model).
